@@ -10,12 +10,24 @@ files:
   - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 mac:
+  icon: build/icon.png
   target:
     - dmg
     - zip
   category: public.app-category.developer-tools
   entitlementsInherit: build/entitlements.mac.plist
+  entitlements: build/entitlements.mac.plist
+dmg:
+  icon: build/icon.png
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
 win:
+  icon: build/icon.png
   target:
     - nsis
 nsis:
@@ -23,6 +35,7 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
 linux:
+  icon: build/icon.png
   target:
     - AppImage
   category: Development

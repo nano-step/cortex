@@ -1395,9 +1395,13 @@ app.whenReady().then(() => {
     return triggerEmbedding()
   })
 
-  // =====================
-  // Create window
-  // =====================
+  if (process.platform === 'darwin') {
+    const dockIconPath = join(__dirname, '../../build/icon.png')
+    if (existsSync(dockIconPath)) {
+      app.dock.setIcon(nativeImage.createFromPath(dockIconPath))
+    }
+  }
+
   createWindow()
 
   setMainWindow(mainWindow)

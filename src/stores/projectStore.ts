@@ -75,7 +75,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  setActiveProject: (id) => set({ activeProjectId: id }),
+  setActiveProject: (id) => {
+    set({ activeProjectId: id })
+    try {
+      if (id) localStorage.setItem('cortex-active-project', id)
+      else localStorage.removeItem('cortex-active-project')
+    } catch {}
+  },
 
   addProject: async (name, sourceType, sourcePath) => {
     if (!window.electronAPI?.createProject) return null

@@ -55,7 +55,7 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mode, setMode, openNewProjectModal, toggleSettings } = useUIStore()
   const { projects, activeProjectId, setActiveProject, removeProject, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation, renameConversation } = useChatStore()
+  const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation, renameConversation, isLoadingConversations } = useChatStore()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectConversations = activeProjectId
@@ -323,6 +323,12 @@ export function Sidebar() {
                 <p className="text-[13px] text-[var(--text-tertiary)]">
                   Chọn một dự án để bắt đầu
                 </p>
+              </div>
+            ) : isLoadingConversations ? (
+              <div className="px-3 py-4 space-y-2">
+                {[70, 85, 60, 90, 50].map((w, i) => (
+                  <div key={i} className="h-8 rounded-lg skeleton-shimmer" style={{ width: `${w}%` }} />
+                ))}
               </div>
             ) : projectConversations.length === 0 ? (
               <div className="px-3 py-8 text-center">

@@ -29,7 +29,20 @@ export function MainLayout() {
   const [onboardingChecked, setOnboardingChecked] = useState(false)
 
   useEffect(() => {
-    loadProjects()
+    loadProjects().then(() => {
+      const { projects, activeProjectId: currentId } = useProjectStore.getState()
+      if (currentId || projects.length === 0) return
+
+      try {
+        const savedId = localStorage.getItem('cortex-active-project')
+        if (savedId && projects.find(p => p.id === savedId)) {
+          useProjectStore.getState().setActiveProject(savedId)
+          return
+        }
+      } catch {}
+
+      useProjectStore.getState().setActiveProject(projects[0].id)
+    })
   }, [loadProjects])
 
   // Check onboarding on first load

@@ -66,6 +66,7 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState('')
   const { toggleArchitecture, setLearningOpen: openLearningPanel } = useUIStore()
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [syncingAtlassian, setSyncingAtlassian] = useState<string | null>(null)
 
   // Per-repo branch state
@@ -180,13 +181,18 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const handleSync = async () => {
     if (!projectId || !stats?.repos.length) return
     setSyncing(true)
+    setSyncToast(null)
     try {
       for (const repo of stats.repos) {
         await window.electronAPI.syncRepo(projectId, repo.id)
       }
       await loadStats()
+      setSyncToast({ type: 'success', message: 'Sync hoàn tất — đã cập nhật dữ liệu' })
+      setTimeout(() => setSyncToast(null), 4000)
     } catch (err) {
       console.error('Sync failed:', err)
+      setSyncToast({ type: 'error', message: 'Sync thất bại' })
+      setTimeout(() => setSyncToast(null), 6000)
     } finally {
       setSyncing(false)
     }
@@ -461,6 +467,17 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
             <X size={18} />
           </button>
         </div>
+
+        {syncToast && (
+          <div className={cn(
+            'mx-6 mt-3 px-3 py-2 rounded-lg text-[12px] animate-in fade-in slide-in-from-top duration-200',
+            syncToast.type === 'success'
+              ? 'bg-[var(--status-success-bg)] border border-[var(--status-success-border)] text-[var(--status-success-text)]'
+              : 'bg-[var(--status-error-bg)] border border-[var(--status-error-border)] text-[var(--status-error-text)]'
+          )}>
+            {syncToast.message}
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">

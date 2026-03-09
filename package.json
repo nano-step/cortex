@@ -11,6 +11,7 @@
     "postinstall": "electron-builder install-app-deps",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac --publish never",
     "test": "vitest run --config vitest.config.ts",
     "test:ui": "vitest run --config vitest.config.ui.ts",
     "test:all": "vitest run --config vitest.config.ts && vitest run --config vitest.config.ui.ts",
@@ -52,18 +53,12 @@
     "vite": "^5.4.0",
     "vitest": "^4.0.18"
   },
-  "build": {
-    "appId": "com.cortex.app",
-    "productName": "Cortex",
-    "directories": {
-      "output": "release"
-    },
-    "mac": {
-      "target": "dmg",
-      "category": "public.app-category.developer-tools"
-    },
-    "win": {
-      "target": "nsis"
-    }
+  "author": {
+    "name": "Hoài Nhớ",
+    "email": "nhoxtvt@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hoainho/cortex"
   }
 }

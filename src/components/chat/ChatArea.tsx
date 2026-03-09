@@ -30,6 +30,8 @@ export function ChatArea() {
 
   // Model rotation notification
   const [rotationNotice, setRotationNotice] = useState<{ fromModel: string; reason: string } | null>(null)
+  // Sync toast notification
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // Add repo modal state
   const [addRepoModalOpen, setAddRepoModalOpen] = useState(false)
 
@@ -226,8 +228,16 @@ export function ChatArea() {
   const handleSync = useCallback(async () => {
     if (!activeProjectId || !activeRepo) return
     await syncState.triggerSync(activeProjectId, activeRepo.id)
-    // Reload project data to refresh brainStatus
     useProjectStore.getState().loadProjects()
+
+    const { indexingPhase, totalFiles, totalChunks } = useSyncStore.getState()
+    if (indexingPhase === 'error') {
+      setSyncToast({ type: 'error', message: 'Sync Brain thất bại' })
+      setTimeout(() => setSyncToast(null), 6000)
+    } else {
+      setSyncToast({ type: 'success', message: `Sync hoàn tất — ${totalFiles} files, ${totalChunks} chunks` })
+      setTimeout(() => setSyncToast(null), 4000)
+    }
   }, [activeProjectId, activeRepo, syncState])
 
   const handleFeedback = useCallback((messageId: string, type: 'thumbs_up' | 'thumbs_down') => {
@@ -602,6 +612,21 @@ export function ChatArea() {
             Đã tự động chuyển sang <span className="font-mono font-medium">{activeModel}</span>
           </span>
           <button onClick={() => setRotationNotice(null)} className="ml-auto p-0.5 rounded hover:bg-[var(--status-warning-bg)]">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* Sync toast */}
+      {syncToast && (
+        <div className={cn(
+          'px-6 py-2 border-b flex items-center gap-2 text-[12px] animate-in fade-in slide-in-from-top duration-200',
+          syncToast.type === 'success'
+            ? 'bg-[var(--status-success-bg)] border-[var(--status-success-border)] text-[var(--status-success-text)]'
+            : 'bg-[var(--status-error-bg)] border-[var(--status-error-border)] text-[var(--status-error-text)]'
+        )}>
+          <span>{syncToast.message}</span>
+          <button onClick={() => setSyncToast(null)} className="ml-auto p-0.5 rounded hover:opacity-70">
             <X size={12} />
           </button>
         </div>
