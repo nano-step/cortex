@@ -1,33 +1,232 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
+    <!-- Background - deep dark -->
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#B34A19;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#8B3514;stop-opacity:1" />
+      <stop offset="0%" stop-color="#080412"/>
+      <stop offset="100%" stop-color="#0A0618"/>
     </linearGradient>
-    <linearGradient id="brain" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#FEF3ED;stop-opacity:0.95" />
+
+    <!-- Brain outline gradient - ORANGE dominant -->
+    <linearGradient id="brainStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFAA30"/>
+      <stop offset="30%" stop-color="#FF8C00"/>
+      <stop offset="60%" stop-color="#FF6A00"/>
+      <stop offset="85%" stop-color="#E85A10"/>
+      <stop offset="100%" stop-color="#D04A08"/>
     </linearGradient>
+
+    <!-- Secondary stroke (lighter orange for inner folds) -->
+    <linearGradient id="foldStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD090"/>
+      <stop offset="30%" stop-color="#FFB860"/>
+      <stop offset="60%" stop-color="#FF9E40"/>
+      <stop offset="100%" stop-color="#FF7820"/>
+    </linearGradient>
+
+    <!-- Tertiary stroke (subtle warm detail folds) -->
+    <linearGradient id="detailStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CC8040"/>
+      <stop offset="50%" stop-color="#B86828"/>
+      <stop offset="100%" stop-color="#A05018"/>
+    </linearGradient>
+
+    <!-- Ambient glow - orange -->
+    <radialGradient id="aura" cx="48%" cy="46%" r="42%">
+      <stop offset="0%" stop-color="#FF8C00" stop-opacity="0.10"/>
+      <stop offset="40%" stop-color="#FF6A00" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#D04A08" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Asymmetric border gradient - balanced brightness at TL and BR -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.80"/>
+      <stop offset="18%" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="55%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="82%" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.72"/>
+    </linearGradient>
+    <linearGradient id="borderBloom" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45"/>
+      <stop offset="22%" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.03"/>
+      <stop offset="78%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.40"/>
+    </linearGradient>
+
+    <!-- Glow filters -->
+    <filter id="outlineGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="5" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="foldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="subtleGlow" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="2" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="megaGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+    <filter id="whiteGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="whiteBright" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
   </defs>
-  <!-- Background rounded square -->
-  <rect width="512" height="512" rx="108" ry="108" fill="url(#bg)"/>
-  <!-- Brain icon centered (scaled Lucide brain path) -->
-  <g transform="translate(96, 16) scale(1.25)">
-    <!-- Brain outline -->
-    <path d="M160 128c0-35.3-28.7-64-64-64C68.7 64 48 76.3 36.8 96A64 64 0 0 0 0 160c0 23.7 12.9 44.3 32 55.4V256c0 35.3 28.7 64 64 64h64V128z" fill="none" stroke="url(#brain)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M96 128c0-35.3 28.7-64 64-64c27.3 0 48 12.3 59.2 32A64 64 0 0 1 256 160c0 23.7-12.9 44.3-32 55.4V256c0 35.3-28.7 64-64 64H96V128z" fill="none" stroke="url(#brain)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-    <!-- Brain center line -->
-    <line x1="128" y1="64" x2="128" y2="320" stroke="url(#brain)" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
-    <!-- Brain folds -->
-    <path d="M48 160 Q88 140 128 160" fill="none" stroke="url(#brain)" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
-    <path d="M128 160 Q168 140 208 160" fill="none" stroke="url(#brain)" stroke-width="10" stroke-linecap="round" opacity="0.7"/>
-    <path d="M56 208 Q92 190 128 208" fill="none" stroke="url(#brain)" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
-    <path d="M128 208 Q164 190 200 208" fill="none" stroke="url(#brain)" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
-    <!-- Neural dots -->
-    <circle cx="80" cy="140" r="6" fill="url(#brain)" opacity="0.8"/>
-    <circle cx="176" cy="140" r="6" fill="url(#brain)" opacity="0.8"/>
-    <circle cx="128" cy="112" r="5" fill="url(#brain)" opacity="0.6"/>
-    <circle cx="96" cy="240" r="5" fill="url(#brain)" opacity="0.5"/>
-    <circle cx="160" cy="240" r="5" fill="url(#brain)" opacity="0.5"/>
+
+  <!-- macOS HIG: icon content at ~80% of canvas, centered, with transparent padding -->
+  <!-- 512 * 0.80 = ~410, padding = 51 per side -->
+  <!-- Background rounded rect - inset for proper macOS dock sizing -->
+  <rect x="51" y="51" width="410" height="410" rx="90" ry="90" fill="url(#bg)"/>
+  <rect x="51" y="51" width="410" height="410" rx="90" ry="90" fill="url(#aura)"/>
+
+  <!-- Asymmetric glowing border - thinner/refined -->
+  <!-- Outermost bloom -->
+  <rect x="50" y="50" width="412" height="412" rx="91" ry="91" fill="none" stroke="url(#borderBloom)" stroke-width="8" filter="url(#whiteBright)"/>
+  <!-- Mid glow bloom -->
+  <rect x="51" y="51" width="410" height="410" rx="90" ry="90" fill="none" stroke="url(#borderBloom)" stroke-width="4" filter="url(#whiteGlow)"/>
+  <!-- Sharp main border -->
+  <rect x="51" y="51" width="410" height="410" rx="90" ry="90" fill="none" stroke="url(#borderGrad)" stroke-width="2.8"/>
+  <!-- Inner edge highlight -->
+  <rect x="53" y="53" width="406" height="406" rx="89" ry="89" fill="none" stroke="url(#borderGrad)" stroke-width="0.8" opacity="0.30"/>
+
+  <!-- ======================================================
+       LATERAL VIEW BRAIN (side view - classic recognizable shape)
+       Scaled 0.80 to fit within the inset 410x410 icon area
+       ====================================================== -->
+
+  <g transform="translate(256, 262) scale(0.75)">
+
+    <!-- Subtle background glow -->
+    <ellipse cx="0" cy="-10" rx="130" ry="100" fill="#FF6A00" opacity="0.04" filter="url(#megaGlow)"/>
+
+    <!-- === GHOST DEPTH LAYERS === -->
+    <!-- Ghost 1 - orange, shifted -->
+    <g transform="translate(-6, 4) scale(1.04)" opacity="0.10" filter="url(#megaGlow)">
+      <path d="M-120,-20 C-124,-50 -116,-90 -96,-110 C-70,-136 -30,-148 10,-142 C50,-136 86,-116 108,-86 C126,-62 134,-30 130,0 C128,24 118,48 100,64 C84,78 64,86 44,88 C28,90 12,86 0,80 C-10,74 -20,66 -30,58 C-46,44 -64,36 -80,36 C-96,36 -108,28 -116,14 C-122,2 -122,-8 -120,-20 Z" fill="none" stroke="#FF6A00" stroke-width="3.5"/>
+    </g>
+
+    <!-- Ghost 2 - darker orange, opposite shift -->
+    <g transform="translate(5, -3) scale(0.97)" opacity="0.08" filter="url(#megaGlow)">
+      <path d="M-120,-20 C-124,-50 -116,-90 -96,-110 C-70,-136 -30,-148 10,-142 C50,-136 86,-116 108,-86 C126,-62 134,-30 130,0 C128,24 118,48 100,64 C84,78 64,86 44,88 C28,90 12,86 0,80 C-10,74 -20,66 -30,58 C-46,44 -64,36 -80,36 C-96,36 -108,28 -116,14 C-122,2 -122,-8 -120,-20 Z" fill="none" stroke="#D05A00" stroke-width="3"/>
+    </g>
+
+    <!-- Inner depth layer - warm orange -->
+    <g transform="scale(0.80)" opacity="0.12" filter="url(#foldGlow)">
+      <path d="M-120,-20 C-124,-50 -116,-90 -96,-110 C-70,-136 -30,-148 10,-142 C50,-136 86,-116 108,-86 C126,-62 134,-30 130,0 C128,24 118,48 100,64 C84,78 64,86 44,88 C28,90 12,86 0,80 C-10,74 -20,66 -30,58 C-46,44 -64,36 -80,36 C-96,36 -108,28 -116,14 C-122,2 -122,-8 -120,-20 Z" fill="none" stroke="#FF9030" stroke-width="1.8"/>
+    </g>
+
+    <!-- === MAIN BRAIN OUTLINE - LATERAL VIEW === -->
+    <g filter="url(#outlineGlow)" fill="none" stroke="url(#brainStroke)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+
+      <!-- Main brain silhouette - side view -->
+      <!-- Starting from the frontal-parietal junction top, going clockwise -->
+      <path d="
+        M-120,-20
+        C-124,-50 -116,-90 -96,-110
+        C-70,-136 -30,-148 10,-142
+        C50,-136 86,-116 108,-86
+        C126,-62 134,-30 130,0
+        C128,24 118,48 100,64
+        C84,78 64,86 44,88
+        C28,90 12,86 0,80
+        C-10,74 -20,66 -30,58
+        C-46,44 -64,36 -80,36
+        C-96,36 -108,28 -116,14
+        C-122,2 -122,-8 -120,-20
+        Z
+      "/>
+
+      <!-- Temporal lobe separation (Sylvian fissure) - the key lateral landmark -->
+      <path d="M-80,36 C-60,28 -30,14 0,4 C30,-6 60,-10 90,-4"/>
+
+      <!-- Cerebellum at the back-bottom -->
+      <path d="M44,88 C56,92 70,94 82,88 C94,82 102,72 100,64"/>
+
+      <!-- Cerebellum internal fold -->
+      <path d="M50,90 C62,86 76,82 86,76" opacity="0.6" stroke-width="2"/>
+    </g>
+
+    <!-- === PRIMARY SULCI (major brain folds) === -->
+    <g filter="url(#foldGlow)" fill="none" stroke="url(#foldStroke)" stroke-width="2.2" stroke-linecap="round">
+
+      <!-- Central sulcus (Rolandic) - the most important landmark -->
+      <path d="M-20,-138 C-16,-120 -8,-96 0,-72 C8,-48 14,-24 18,0" opacity="0.75"/>
+
+      <!-- Precentral sulcus -->
+      <path d="M-44,-130 C-40,-108 -34,-82 -30,-58 C-26,-38 -24,-18 -24,0" opacity="0.55"/>
+
+      <!-- Postcentral sulcus -->
+      <path d="M14,-134 C20,-112 28,-86 34,-60 C38,-40 40,-20 38,2" opacity="0.50"/>
+
+      <!-- Superior frontal sulcus -->
+      <path d="M-100,-102 C-84,-108 -66,-112 -48,-110" opacity="0.45"/>
+
+      <!-- Inferior frontal sulcus -->
+      <path d="M-108,-68 C-90,-76 -68,-82 -50,-80" opacity="0.40"/>
+
+      <!-- Superior temporal sulcus -->
+      <path d="M-60,50 C-36,42 -10,32 20,26 C48,20 72,18 90,20" opacity="0.55"/>
+
+      <!-- Inferior temporal sulcus -->
+      <path d="M-48,66 C-26,60 0,52 24,48 C48,44 68,42 84,44" opacity="0.40"/>
+
+      <!-- Parieto-occipital sulcus -->
+      <path d="M74,-110 C78,-88 82,-62 84,-38" opacity="0.50"/>
+
+      <!-- Intraparietal sulcus -->
+      <path d="M26,-100 C42,-92 60,-82 76,-68 C88,-56 96,-42 100,-28" opacity="0.45"/>
+
+      <!-- Calcarine sulcus -->
+      <path d="M90,-28 C96,-14 102,2 106,18 C110,34 110,50 106,62" opacity="0.40"/>
+    </g>
+
+    <!-- === SECONDARY SULCI (finer details) === -->
+    <g filter="url(#subtleGlow)" fill="none" stroke="url(#detailStroke)" stroke-width="1.5" stroke-linecap="round">
+
+      <!-- Frontal lobe gyri -->
+      <path d="M-74,-126 C-68,-118 -60,-108 -54,-100" opacity="0.35"/>
+      <path d="M-92,-86 C-82,-92 -72,-96 -62,-96" opacity="0.30"/>
+
+      <!-- Parietal lobe details -->
+      <path d="M48,-120 C54,-106 58,-90 60,-76" opacity="0.35"/>
+      <path d="M62,-98 C72,-90 80,-78 84,-66" opacity="0.30"/>
+
+      <!-- Occipital lobe details -->
+      <path d="M98,-60 C106,-46 112,-30 114,-14" opacity="0.30"/>
+      <path d="M110,14 C114,28 114,42 110,54" opacity="0.25"/>
+
+      <!-- Temporal lobe details -->
+      <path d="M-36,56 C-20,50 -2,44 16,40" opacity="0.30"/>
+
+      <!-- Precentral gyrus detail -->
+      <path d="M-38,-100 C-30,-88 -22,-72 -16,-56" opacity="0.28"/>
+
+      <!-- Additional short curved details for realism -->
+      <path d="M-82,-46 Q-88,-38 -84,-30" opacity="0.22"/>
+      <path d="M-68,-60 Q-74,-52 -70,-44" opacity="0.22"/>
+      <path d="M56,-48 Q62,-40 58,-32" opacity="0.22"/>
+      <path d="M72,-30 Q78,-22 74,-14" opacity="0.22"/>
+      <path d="M40,-80 Q46,-72 42,-64" opacity="0.20"/>
+    </g>
+
+    <!-- === TERTIARY MICRO-FOLDS === -->
+    <g filter="url(#subtleGlow)" fill="none" stroke="url(#detailStroke)" stroke-width="0.8" stroke-linecap="round" opacity="0.18">
+      <path d="M-56,-118 Q-52,-112 -56,-106"/>
+      <path d="M-86,-74 Q-80,-68 -84,-62"/>
+      <path d="M-100,-40 Q-94,-34 -98,-28"/>
+      <path d="M28,-128 Q34,-122 30,-116"/>
+      <path d="M66,-54 Q72,-48 68,-42"/>
+      <path d="M94,-18 Q100,-12 96,-6"/>
+      <path d="M116,8 Q120,16 116,22"/>
+      <path d="M-16,56 Q-10,50 -14,44"/>
+      <path d="M34,60 Q40,54 36,48"/>
+    </g>
+
   </g>
 </svg>
