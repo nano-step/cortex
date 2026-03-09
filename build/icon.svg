@@ -12,7 +12,7 @@
   <!-- Background rounded square -->
   <rect width="512" height="512" rx="108" ry="108" fill="url(#bg)"/>
   <!-- Brain icon centered (scaled Lucide brain path) -->
-  <g transform="translate(96, 80) scale(1.25)">
+  <g transform="translate(96, 16) scale(1.25)">
     <!-- Brain outline -->
     <path d="M160 128c0-35.3-28.7-64-64-64C68.7 64 48 76.3 36.8 96A64 64 0 0 0 0 160c0 23.7 12.9 44.3 32 55.4V256c0 35.3 28.7 64 64 64h64V128z" fill="none" stroke="url(#brain)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
     <path d="M96 128c0-35.3 28.7-64 64-64c27.3 0 48 12.3 59.2 32A64 64 0 0 1 256 160c0 23.7-12.9 44.3-32 55.4V256c0 35.3-28.7 64-64 64H96V128z" fill="none" stroke="url(#brain)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
