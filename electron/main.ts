@@ -67,6 +67,7 @@ import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills
 import { getProjectToolDefinitions, executeProjectTool } from './services/skills/builtin/project-tools'
 import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
 import { getArtistToolDefinitions, executeArtistTool } from './services/skills/builtin/artist-tools'
+import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
 import { routeTools } from './services/tool-router'
@@ -1164,6 +1165,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         const projectTools = getProjectToolDefinitions(projectId)
         const visionTools = getVisionToolDefinitions()
         const artistTools = getArtistToolDefinitions()
+        const codeAdvisorTools = getCodeAdvisorToolDefinitions()
         const perplexityTools = getPerplexityToolDefinitions()
         let mcpToolDefs: Awaited<ReturnType<typeof getToolDefinitions>> = []
         try {
@@ -1171,7 +1173,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
         }
-        const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...perplexityTools]
+        const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...codeAdvisorTools, ...perplexityTools]
         let allTools: typeof coreTools
         if (forcePerplexityMode) {
           allTools = perplexityTools
@@ -1226,7 +1228,8 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
             const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
             const isArtistTool = /^cortex_(generate_image|edit_image)/.test(toolCall.function.name)
-            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool
+            const isCodeAdvisor = /^cortex_(code_advisor|find_similar_code|suggest_fix|explain_code_pattern)/.test(toolCall.function.name)
+            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool && !isCodeAdvisor
 
             const toolResult = isPerplexity
               ? await executePerplexityTool(toolCall.function.name, toolCall.function.arguments)
@@ -1234,6 +1237,8 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
               ? await executeVisionTool(toolCall.function.name, toolCall.function.arguments)
               : isArtistTool
               ? await executeArtistTool(toolCall.function.name, toolCall.function.arguments)
+              : isCodeAdvisor
+              ? await executeCodeAdvisorTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : isProjectTool
               ? await executeProjectTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : isBuiltinFs
