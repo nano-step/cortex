@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // System dialogs
   openFolderDialog: () => ipcRenderer.invoke('dialog:openFolder'),
   openFileDialog: () => ipcRenderer.invoke('dialog:openFiles'),
+  openFilesFromPaths: (paths: string[]) => ipcRenderer.invoke('dialog:openFilesFromPaths', paths),
 
   // Project CRUD
   createProject: (name: string, brainName: string) =>
@@ -43,6 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('conversation:updateTitle', conversationId, title),
   deleteConversation: (conversationId: string) =>
     ipcRenderer.invoke('conversation:delete', conversationId),
+  pinConversation: (conversationId: string) =>
+    ipcRenderer.invoke('conversation:pin', conversationId),
 
   // Message CRUD
   createMessage: (conversationId: string, role: string, content: string, mode: string, contextChunks?: string) =>
@@ -149,6 +152,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('settings:setLLMConfig', maxTokens, contextMessages),
   getEmbeddingConfig: () => ipcRenderer.invoke('settings:getEmbeddingConfig'),
   testEmbeddingConnection: () => ipcRenderer.invoke('settings:testEmbeddingConnection'),
+  getQdrantConfig: () => ipcRenderer.invoke('settings:getQdrantConfig'),
+  setQdrantConfig: (url: string, apiKey: string) => ipcRenderer.invoke('settings:setQdrantConfig', url, apiKey),
+  getJinaApiKey: () => ipcRenderer.invoke('settings:getJinaApiKey'),
+  setJinaApiKey: (key: string) => ipcRenderer.invoke('settings:setJinaApiKey', key),
+  getPerplexityCookies: () => ipcRenderer.invoke('settings:getPerplexityCookies'),
+  setPerplexityCookies: (cookies: string) => ipcRenderer.invoke('settings:setPerplexityCookies', cookies),
+  loginPerplexity: () => ipcRenderer.invoke('settings:loginPerplexity'),
+  testPerplexity: () => ipcRenderer.invoke('settings:testPerplexity'),
   getGitConfig: () => ipcRenderer.invoke('settings:getGitConfig'),
   setGitConfig: (cloneDepth: number) => ipcRenderer.invoke('settings:setGitConfig', cloneDepth),
   testProxyConnection: (url: string, key: string) =>
@@ -295,6 +306,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   mcpConnect: (id: string) => ipcRenderer.invoke('mcp:connect', id),
   mcpDisconnect: (id: string) => ipcRenderer.invoke('mcp:disconnect', id),
   mcpHealth: (id: string) => ipcRenderer.invoke('mcp:health', id),
+  onModelDownloadProgress: (callback: (data: { model: string; status: string; progress?: number; file?: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('model:downloadProgress', handler)
+    return () => ipcRenderer.removeListener('model:downloadProgress', handler)
+  },
+
+  mcpGetPresets: () => ipcRenderer.invoke('mcp:getPresets'),
+  mcpInstallPreset: (presetId: string, envValues: Record<string, string>) =>
+    ipcRenderer.invoke('mcp:installPreset', presetId, envValues),
 
   // V3: Hook System
   hooksList: () => ipcRenderer.invoke('hooks:list'),

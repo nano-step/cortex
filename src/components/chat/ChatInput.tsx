@@ -4,7 +4,7 @@ import {
   Bot, Shield, Gauge, Code, Blocks, Sparkles, Wrench, Globe, Palette,
   GitBranch, FlaskConical, Brain, RefreshCw, Activity, PenLine, Lightbulb,
   MessageCircle, Users, Database, Repeat, Zap, XCircle, Play, Square,
-  ArrowRightLeft, ArrowUpCircle, CheckCircle, Package, FileJson, GitCompare, Settings
+  ArrowRightLeft, ArrowUpCircle, CheckCircle, Package, FileJson, GitCompare, Settings, Search
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ChatAttachment } from '../../types'
@@ -22,7 +22,7 @@ const ICON_MAP: Record<string, typeof Bot> = {
   Bot, Sparkles, Shield, Gauge, Code, Blocks, Wrench, Globe, Palette,
   GitBranch, FlaskConical, Brain, RefreshCw, Activity, PenLine, Lightbulb,
   MessageCircle, Users, Database, Repeat, Zap, XCircle, Play, Square,
-  ArrowRightLeft, ArrowUpCircle, CheckCircle, Package, FileJson, GitCompare, Settings,
+  ArrowRightLeft, ArrowUpCircle, CheckCircle, Package, FileJson, GitCompare, Settings, Search,
 }
 
 const FALLBACK_COMMANDS: SlashCommand[] = [
@@ -60,6 +60,7 @@ const FALLBACK_COMMANDS: SlashCommand[] = [
   { command: '/diff-review', label: 'Diff Review', description: 'Review git diff với multi-perspective analysis', icon: 'GitCompare' },
   { command: '/rtk-setup', label: 'RTK Setup', description: 'Redux Toolkit setup và enforcement', icon: 'Settings' },
   { command: '/multi-agent', label: 'Multi-Agent', description: 'Phân tích toàn diện với 8 agents chuyên biệt', icon: 'Users' },
+  { command: '/perplexity', label: 'Perplexity Deep Search', description: 'Deep research với Perplexity Pro — tìm kiếm web, đọc URL, phân tích', icon: 'Search' },
   { command: '/agents', label: 'Agent Mode', description: 'Chọn agent mode (Sisyphus, Hephaestus, Prometheus, Atlas)', icon: 'Bot' },
 ]
 
@@ -151,9 +152,12 @@ function AttachmentPreview({ attachment, onRemove }: { attachment: ChatAttachmen
 export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }: ChatInputProps) {
   const [value, setValue] = useState('')
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const agentPopupRef = useRef<HTMLDivElement>(null)
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const dragCounter = useRef(0)
 
   const [activeAgentMode, setActiveAgentMode] = useState<AgentMode | null>(AGENT_MODES[0])
   const [showAgentPopup, setShowAgentPopup] = useState(false)
@@ -237,7 +241,6 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }
     onSend(trimmed, attachments, activeAgentMode?.id || null)
     setValue('')
     setAttachments([])
-    setActiveAgentMode(AGENT_MODES[0])
     setShowSlashMenu(false)
     setSlashFilter('')
     setShowAgentPopup(false)
@@ -303,10 +306,77 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }
     setAttachments(prev => prev.filter(a => a.id !== id))
   }, [])
 
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current++
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current--
+    if (dragCounter.current === 0) {
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current = 0
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+
+    const paths = files.map(f => (f as File & { path?: string }).path).filter(Boolean) as string[]
+    if (paths.length > 0 && window.electronAPI?.openFilesFromPaths) {
+      try {
+        const loaded = await window.electronAPI.openFilesFromPaths(paths)
+        if (loaded && loaded.length > 0) {
+          setAttachments(prev => [...prev, ...loaded])
+        }
+      } catch (err) {
+        console.error('Failed to load dropped files:', err)
+      }
+    }
+  }, [])
+
   const canSend = value.trim() || attachments.length > 0
 
   return (
-    <div className="px-6 pb-5 pt-2">
+    <div
+      className="px-6 pb-5 pt-2 relative"
+      ref={dropZoneRef}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-[var(--accent-primary)]/10 border-2 border-dashed border-[var(--accent-primary)] rounded-2xl backdrop-blur-sm transition-all">
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-12 h-12 rounded-xl bg-[var(--accent-primary)] flex items-center justify-center">
+              <ImageIcon size={24} className="text-white" />
+            </div>
+            <span className="text-[14px] font-semibold text-[var(--accent-primary)]">
+              Thả file để upload
+            </span>
+            <span className="text-[12px] text-[var(--text-tertiary)]">
+              Hỗ trợ: ảnh, PDF, text, code
+            </span>
+          </div>
+        </div>
+      )}
       <div className="max-w-[720px] mx-auto">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2 px-1">

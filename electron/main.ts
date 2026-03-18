@@ -65,7 +65,10 @@ import { detectWebSearchTrigger, searchWeb, webResultsToChunkContent } from './s
 import { listMCPServers, addMCPServer, removeMCPServer, connectMCPServer, disconnectMCPServer, checkMCPServerHealth, shutdownAllMCP, ensureCoreMCPServers, autoConnectMCPServers, getToolDefinitions, executeMCPTool, getPresetStatuses, installPreset } from './services/skills/mcp/mcp-manager'
 import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills/builtin/filesystem-tools'
 import { getProjectToolDefinitions, executeProjectTool } from './services/skills/builtin/project-tools'
+import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
+import { getArtistToolDefinitions, executeArtistTool } from './services/skills/builtin/artist-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
+import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
 import { routeTools } from './services/tool-router'
 import { classifyIntentSmart, type SmartIntentResult } from './services/skills/smart-intent-classifier'
 import {
@@ -224,6 +227,43 @@ app.whenReady().then(() => {
 
     return result.filePaths.map(filePath => {
       try {
+        const stats = statSync(filePath)
+        if (stats.size > MAX_FILE_SIZE) return null
+
+        const name = filePath.split(/[\\/]/).pop() || filePath
+        const ext = name.split('.').pop()?.toLowerCase() || ''
+        const isImage = IMAGE_EXTS.has(ext)
+        const mimeType = isImage
+          ? (ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`)
+          : ext === 'pdf' ? 'application/pdf'
+          : 'text/plain'
+
+        const buffer = readFileSync(filePath)
+        const base64 = buffer.toString('base64')
+
+        return {
+          id: randomUUID(),
+          name,
+          path: filePath,
+          size: stats.size,
+          mimeType,
+          isImage,
+          base64: isImage || ext === 'pdf' ? base64 : undefined,
+          textContent: !isImage && ext !== 'pdf' ? buffer.toString('utf-8') : undefined
+        }
+      } catch {
+        return null
+      }
+    }).filter(Boolean)
+  })
+
+  ipcMain.handle('dialog:openFilesFromPaths', (_event, filePaths: string[]) => {
+    const MAX_FILE_SIZE = 10 * 1024 * 1024
+    const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+
+    return filePaths.map(filePath => {
+      try {
+        if (!existsSync(filePath)) return null
         const stats = statSync(filePath)
         if (stats.size > MAX_FILE_SIZE) return null
 
@@ -451,6 +491,16 @@ app.whenReady().then(() => {
     ) => {
       const emitThinking = (step: string, status: string, label: string, detail?: string, durationMs?: number) => {
         mainWindow?.webContents.send('chat:thinking', { conversationId, step, status, label, detail, durationMs })
+      }
+
+      const queuePos = getQueueLength(conversationId)
+      if (queuePos > 0) {
+        emitThinking('queue', 'running', 'Xếp hàng', `Vị trí: ${queuePos + 1}`)
+      }
+
+      return enqueueMessage(conversationId, async () => {
+      if (queuePos > 0) {
+        emitThinking('queue', 'done', 'Xếp hàng', 'Đến lượt xử lý')
       }
 
       let routedModel = ''
@@ -739,7 +789,6 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           return { success: true, content: agentResponse, contextChunks: [] }
         }
 
-        // Pipeline path: orchestrate (multi-agent for complex queries)
         if (pipelinePath.path === 'orchestrate' && !forcePerplexityMode) {
           emitThinking('orchestrate', 'running', 'Multi-Agent Orchestrator', pipelinePath.reason)
           try {
@@ -747,21 +796,29 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
             const orchResult = await orchestrate({
               query, projectId, conversationId, mode: mode as 'pm' | 'engineering'
             })
-            const agentList = orchResult.activatedAgents.join(', ')
-            emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator',
-              `${orchResult.activatedAgents.length} agents: ${agentList} (${orchResult.totalDurationMs}ms)`)
 
-            const header = `## Multi-Agent Analysis\n**Intent:** ${orchResult.intent.primaryIntent} (confidence: ${(orchResult.intent.confidence * 100).toFixed(0)}%)\n**Team:** ${agentList}\n**Duration:** ${orchResult.totalDurationMs}ms\n\n`
-            const agentResponse = header + orchResult.response
+            const hasResults = orchResult.agentOutputs.some(o => o.status === 'completed' && o.content.trim().length > 0)
 
-            await stageAfterHooks({
-              projectId, conversationId, query, response: agentResponse,
-              model: routedModel, metadata: { path: 'orchestrate', bgTasks }
-            }, emitThinking)
+            if (hasResults) {
+              const agentList = orchResult.activatedAgents.join(', ')
+              emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator',
+                `${orchResult.activatedAgents.length} agents: ${agentList} (${orchResult.totalDurationMs}ms)`)
 
-            mainWindow?.webContents.send('chat:stream', { conversationId, content: agentResponse, done: true })
-            persistAssistantResponse(conversationId, agentResponse)
-            return { success: true, content: agentResponse, contextChunks: [] }
+              const header = `## Multi-Agent Analysis\n**Intent:** ${orchResult.intent.primaryIntent} (confidence: ${(orchResult.intent.confidence * 100).toFixed(0)}%)\n**Team:** ${agentList}\n**Duration:** ${orchResult.totalDurationMs}ms\n\n`
+              const agentResponse = header + orchResult.response
+
+              await stageAfterHooks({
+                projectId, conversationId, query, response: agentResponse,
+                model: routedModel, metadata: { path: 'orchestrate', bgTasks }
+              }, emitThinking)
+
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: agentResponse, done: true })
+              persistAssistantResponse(conversationId, agentResponse)
+              return { success: true, content: agentResponse, contextChunks: [] }
+            }
+
+            console.warn('[Pipeline] Orchestrator produced no results, falling through to standard flow')
+            emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator', 'Không có kết quả, chuyển sang RAG → LLM')
           } catch (orchErr) {
             console.warn('[Pipeline] Orchestrator failed, falling through to standard:', orchErr)
             emitThinking('orchestrate', 'error', 'Multi-Agent Orchestrator', 'Fallback to standard flow')
@@ -1034,6 +1091,29 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         if (compressionStats) {
           console.log(`[Chat] Context compression: ${compressionStats.savingsPercent}% token savings`)
         }
+
+        // Inject image attachments as multimodal content into the last user message
+        if (attachments && attachments.some(a => a.isImage && a.base64)) {
+          const lastUserIdx = messages.length - 1 - [...messages].reverse().findIndex(m => m.role === 'user')
+          if (lastUserIdx >= 0 && lastUserIdx < messages.length) {
+            const userMsg = messages[lastUserIdx]
+            const textContent = typeof userMsg.content === 'string' ? userMsg.content : ''
+            const multiContent: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [
+              { type: 'text', text: textContent }
+            ]
+            for (const att of attachments) {
+              if (att.isImage && att.base64) {
+                multiContent.push({
+                  type: 'image_url',
+                  image_url: { url: `data:${att.mimeType};base64,${att.base64}`, detail: 'auto' }
+                })
+              }
+            }
+            ;(messages[lastUserIdx] as unknown as Record<string, unknown>).content = multiContent
+            console.log(`[Chat] Injected ${attachments.filter(a => a.isImage).length} image(s) as multimodal content`)
+          }
+        }
+
         emitThinking('build_prompt', 'done', 'Xây dựng prompt',
           compressionStats ? `Nén ${compressionStats.savingsPercent}% tokens` : `${context.length} chunks context`,
           Date.now() - stepStart)
@@ -1082,6 +1162,8 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
         const builtinTools = getBuiltinToolDefinitions(projectId)
         const projectTools = getProjectToolDefinitions(projectId)
+        const visionTools = getVisionToolDefinitions()
+        const artistTools = getArtistToolDefinitions()
         const perplexityTools = getPerplexityToolDefinitions()
         let mcpToolDefs: Awaited<ReturnType<typeof getToolDefinitions>> = []
         try {
@@ -1089,7 +1171,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
         }
-        const coreTools = [...builtinTools, ...projectTools, ...perplexityTools]
+        const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...perplexityTools]
         let allTools: typeof coreTools
         if (forcePerplexityMode) {
           allTools = perplexityTools
@@ -1142,10 +1224,16 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           const executeOneTool = async (toolCall: typeof streamResult.toolCalls[0]) => {
             const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
-            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool
+            const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
+            const isArtistTool = /^cortex_(generate_image|edit_image)/.test(toolCall.function.name)
+            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool
 
             const toolResult = isPerplexity
               ? await executePerplexityTool(toolCall.function.name, toolCall.function.arguments)
+              : isVisionTool
+              ? await executeVisionTool(toolCall.function.name, toolCall.function.arguments)
+              : isArtistTool
+              ? await executeArtistTool(toolCall.function.name, toolCall.function.arguments)
               : isProjectTool
               ? await executeProjectTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : isBuiltinFs
@@ -1329,6 +1417,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
         return { success: false, error: errorMsg }
       }
+      }) // enqueueMessage
     }
   )
 
@@ -1340,6 +1429,9 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     }
     return true
   })
+
+  ipcMain.handle('queue:status', () => getQueueStatus())
+  ipcMain.handle('queue:clear', (_event, conversationId: string) => clearQueue(conversationId))
 
   // =====================
   // IPC: LLM Model info

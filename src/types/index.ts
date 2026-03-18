@@ -45,6 +45,7 @@ export interface Conversation {
   title: string
   mode: ResponseMode
   branch: string
+  pinned: boolean
   messages: Message[]
   createdAt: number
 }
@@ -323,6 +324,7 @@ declare global {
       // Dialogs
       openFolderDialog: () => Promise<string | null>
       openFileDialog: () => Promise<ChatAttachment[]>
+      openFilesFromPaths: (paths: string[]) => Promise<ChatAttachment[]>
 
       // Project CRUD
       createProject: (name: string, brainName: string) => Promise<any>
@@ -346,6 +348,7 @@ declare global {
       getConversationsByProject: (projectId: string) => Promise<any[]>
       updateConversationTitle: (conversationId: string, title: string) => Promise<boolean>
       deleteConversation: (conversationId: string) => Promise<boolean>
+      pinConversation: (conversationId: string) => Promise<boolean>
 
       // Message CRUD
       createMessage: (conversationId: string, role: string, content: string, mode: string, contextChunks?: string) => Promise<any>
@@ -416,8 +419,16 @@ declare global {
       setProxyConfig: (url: string, key: string) => Promise<boolean>
       getLLMConfig: () => Promise<{ maxTokens: number; contextMessages: number }>
       setLLMConfig: (maxTokens: number, contextMessages: number) => Promise<boolean>
-      getEmbeddingConfig: () => Promise<{ mode: string; model: string; dimensions: number }>
+      getEmbeddingConfig: () => Promise<{ mode: string; model: string; dimensions: number; url: string; hasApiKey: boolean }>
       testEmbeddingConnection: () => Promise<{ success: boolean; dimensions?: number; latencyMs?: number; error?: string }>
+      getQdrantConfig: () => Promise<{ url: string; apiKey: string }>
+      setQdrantConfig: (url: string, apiKey: string) => Promise<boolean>
+      getJinaApiKey: () => Promise<string>
+      setJinaApiKey: (key: string) => Promise<boolean>
+      getPerplexityCookies: () => Promise<string>
+      setPerplexityCookies: (cookies: string) => Promise<boolean>
+      loginPerplexity: () => Promise<{ success: boolean; error?: string }>
+      testPerplexity: () => Promise<{ success: boolean; latencyMs?: number; preview?: string; error?: string }>
       getGitConfig: () => Promise<{ cloneDepth: number }>
       setGitConfig: (cloneDepth: number) => Promise<boolean>
       testProxyConnection: (url: string, key: string) => Promise<{ success: boolean; error?: string; latencyMs?: number }>
@@ -503,6 +514,14 @@ declare global {
       mcpConnect: (id: string) => Promise<{ success: boolean; error?: string }>
       mcpDisconnect: (id: string) => Promise<boolean>
       mcpHealth: (id: string) => Promise<{ connected: boolean; toolCount: number; resourceCount: number; error?: string }>
+      onModelDownloadProgress: (callback: (data: { model: string; status: string; progress?: number; file?: string }) => void) => () => void
+
+      mcpGetPresets: () => Promise<Array<{
+        id: string; name: string; description: string; category: string; iconName: string
+        envVars: Array<{ name: string; label: string; placeholder: string; encrypted: boolean; required: boolean }>
+        installed: boolean; configured: boolean; connected: boolean
+      }>>
+      mcpInstallPreset: (presetId: string, envValues: Record<string, string>) => Promise<any>
 
       // Events
       onIndexingProgress: (callback: (data: IndexingProgress) => void) => () => void
