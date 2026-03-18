@@ -22,7 +22,8 @@ import { existsSync, rmSync, readFileSync, statSync } from 'fs'
 import {
   initSettingsTable, getProxyConfig, setProxyConfig, getLLMConfig, setLLMConfig,
   getGitConfig, setGitConfig, testProxyConnection, getSetting, setSetting,
-  getGitHubPAT, setGitHubPAT
+  getGitHubPAT, setGitHubPAT,
+  getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey
 } from './services/settings-service'
 import { testJiraConnection, fetchJiraProjects } from './services/jira-service'
 import { fetchSpaces } from './services/confluence-service'
@@ -40,6 +41,7 @@ import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
 import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS } from './services/embedder'
+import { resetQdrantClient } from './services/qdrant-store'
 
 // V2: Memory System
 import {
@@ -48,7 +50,7 @@ import {
   updateCoreMemory, getCoreMemory, addArchivalMemory, deleteArchivalMemory,
   addRecallMemory, deleteConversationRecall
 } from './services/memory/memory-manager'
-import { getCoreMemoryForPrompt, getCoreMemorySection } from './services/memory/core-memory'
+import { getCoreMemoryForPrompt, getCoreMemorySection, deleteCoreMemory } from './services/memory/core-memory'
 import { searchArchivalMemory, getArchivalMemories } from './services/memory/archival-memory'
 import { searchRecallMemory, getConversationRecall, getRecentRecall } from './services/memory/recall-memory'
 import { runMigration, getMigrationStatus } from './services/memory/migration'
@@ -60,12 +62,17 @@ import { loadAndRegisterAll } from './services/skills/skill-loader'
 import { detectWebSearchTrigger, searchWeb, webResultsToChunkContent } from './services/websearch-service'
 
 // V2: MCP Manager
-import { listMCPServers, addMCPServer, removeMCPServer, connectMCPServer, disconnectMCPServer, checkMCPServerHealth, shutdownAllMCP, autoConnectMCPServers, getToolDefinitions, executeMCPTool } from './services/skills/mcp/mcp-manager'
+import { listMCPServers, addMCPServer, removeMCPServer, connectMCPServer, disconnectMCPServer, checkMCPServerHealth, shutdownAllMCP, ensureCoreMCPServers, autoConnectMCPServers, getToolDefinitions, executeMCPTool, getPresetStatuses, installPreset } from './services/skills/mcp/mcp-manager'
 import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills/builtin/filesystem-tools'
+import { getProjectToolDefinitions, executeProjectTool } from './services/skills/builtin/project-tools'
+import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
+import { routeTools } from './services/tool-router'
+import { classifyIntentSmart, type SmartIntentResult } from './services/skills/smart-intent-classifier'
 
 // V2: Efficiency Engine
-import { initCostSchema, recordUsage, estimateCost, getCompressionStats } from './services/skills/efficiency/cost-tracker'
-import { initCacheSchema, getCachedResponse, cacheResponse, invalidateCacheForQuery } from './services/skills/efficiency/semantic-cache'
+import { initCostSchema, recordUsage, estimateCost, getCompressionStats, getCostByProject, getDailyCosts } from './services/skills/efficiency/cost-tracker'
+import { initCacheSchema, getCachedResponse, cacheResponse, invalidateCacheForQuery, invalidateCache, getCacheStats } from './services/skills/efficiency/semantic-cache'
+import { getOpenRouterApiKey, setOpenRouterApiKey, getOpenRouterEnabled, setOpenRouterEnabled, getFreeModels, testOpenRouterConnection } from './services/skills/efficiency/openrouter-fallback'
 
 // V2: Learning Engine
 import { recordEvent } from './services/skills/learning/event-collector'
@@ -444,6 +451,8 @@ app.whenReady().then(() => {
       let routingDecision: ReturnType<typeof resolveCategory> | undefined
 
       try {
+        console.log(`[Chat] Raw query received: "${query.slice(0, 100)}"`)
+
         // 0. Sanitize prompt for injection
         let stepStart = Date.now()
         emitThinking('sanitize', 'running', 'Phân tích câu hỏi')
@@ -469,22 +478,58 @@ app.whenReady().then(() => {
         }
 
         // 0c. Inject agent mode context (Sisyphus, Hephaestus, etc.)
+        const SUPERPOWERS_CORE = `[systematic-resolution]
+WHEN YOU CANNOT ANSWER FROM RAG CONTEXT ALONE — DO NOT SAY "tôi không biết". Follow this 4-phase process:
+
+Phase 1 — INVESTIGATE: Use ALL available tools before giving up.
+  - cortex_git_contributors: team size, who works on what
+  - cortex_git_log_search: when something was changed, by whom
+  - cortex_grep_search: find exact text/config/variable across ALL files
+  - cortex_search_config: find config values, env vars, settings
+  - cortex_project_stats: file counts, languages, activity
+  - cortex_perplexity_search: web information, external docs
+  - cortex_perplexity_read_url: read specific URLs
+  - cortex_read_file: read specific files when you know the path
+Phase 2 — COMPARE: Look at similar working patterns in the codebase.
+Phase 3 — HYPOTHESIZE: "I believe the answer is X because tool Y returned Z."
+Phase 4 — VERIFY: Confirm with another tool or cross-reference before responding.
+
+NEVER skip to "I don't know" without completing Phase 1.
+NEVER ask user for clarification without trying tools first.
+If after ALL tools you still cannot answer, explain what you TRIED and what's missing.
+
+[response-verification]
+BEFORE sending ANY response, verify:
+1. Does it directly answer the user's question? (not tangential info)
+2. Is it based on evidence (tool results, code chunks) or speculation?
+3. If you used tools, include the key evidence in your response.
+4. If you couldn't find the answer, list what tools you tried.
+5. NEVER express false confidence. NEVER say "should work" without running verification.
+
+[query-clarification]
+For AMBIGUOUS queries (multiple valid interpretations):
+- Do NOT ask 5+ open-ended questions before acting.
+- Propose 2-3 concrete approaches with trade-offs.
+- Lead with your recommendation and reasoning.
+- ONE question at a time. Multiple choice preferred.
+- Try to ANSWER first using tools, only clarify if tools are insufficient.`
+
         const AGENT_MODE_CONFIGS: Record<string, { systemPrompt: string; modeDirectives: string }> = {
           sisyphus: {
             systemPrompt: 'You are Sisyphus — the Ultraworker. A relentless, high-output execution agent. You take complex tasks and break them into atomic steps, then execute each step with maximum precision and speed. You never stop until the task is fully complete.',
-            modeDirectives: `[analyze-mode]\nANALYSIS MODE. Gather context before diving deep:\nCONTEXT GATHERING (parallel):\n- 1-2 explore agents (codebase patterns, implementations)\n- 1-2 librarian agents (if external library involved)\n- Direct tools: Grep, AST-grep, LSP for targeted searches\nIF COMPLEX - DO NOT STRUGGLE ALONE. Consult specialists:\n- Oracle: Conventional problems (architecture, debugging, complex logic)\n- Artistry: Non-conventional problems (different approach needed)\nSYNTHESIZE findings before proceeding.\n\n[search-mode]\nMAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:\n- explore agents (codebase patterns, file structures, ast-grep)\n- librarian agents (remote repos, official docs, GitHub examples)\nPlus direct tools: Grep, ripgrep, ast-grep\nNEVER stop at first result - be exhaustive.\n\n[todo-continuation]\nWhen tasks remain incomplete:\n- Track progress via structured todo list\n- Continue working on pending tasks without asking\n- Mark each task complete when finished\n- Do not stop until all tasks are done`
+            modeDirectives: `${SUPERPOWERS_CORE}\n\n[analyze-mode]\nANALYSIS MODE. Gather context before diving deep:\nCONTEXT GATHERING (parallel):\n- 1-2 explore agents (codebase patterns, implementations)\n- 1-2 librarian agents (if external library involved)\n- Direct tools: Grep, AST-grep, LSP for targeted searches\nIF COMPLEX - DO NOT STRUGGLE ALONE. Consult specialists:\n- Oracle: Conventional problems (architecture, debugging, complex logic)\n- Artistry: Non-conventional problems (different approach needed)\nSYNTHESIZE findings before proceeding.\n\n[search-mode]\nMAXIMIZE SEARCH EFFORT. Launch multiple background agents IN PARALLEL:\n- explore agents (codebase patterns, file structures, ast-grep)\n- librarian agents (remote repos, official docs, GitHub examples)\nPlus direct tools: Grep, ripgrep, ast-grep\nNEVER stop at first result - be exhaustive.\n\n[todo-continuation]\nWhen tasks remain incomplete:\n- Track progress via structured todo list\n- Continue working on pending tasks without asking\n- Mark each task complete when finished\n- Do not stop until all tasks are done`
           },
           hephaestus: {
             systemPrompt: 'You are Hephaestus — the Deep Agent. A thorough, research-first problem solver. You investigate problems deeply before acting, examining all angles and dependencies. You prefer understanding root causes over quick fixes.',
-            modeDirectives: `[deep-research-mode]\nDEEP RESEARCH MODE. Investigate thoroughly before any action:\n- Read ALL relevant source files before proposing changes\n- Trace call chains and dependency graphs\n- Understand the full context of the problem space\n- Document findings before implementing\n\n[root-cause-analysis]\nFor every problem:\n1. Reproduce and understand the symptom\n2. Trace backwards through the code to find the actual root cause\n3. Verify your hypothesis before fixing\n4. Consider side effects of any changes`
+            modeDirectives: `${SUPERPOWERS_CORE}\n\n[deep-research-mode]\nDEEP RESEARCH MODE. Investigate thoroughly before any action:\n- Read ALL relevant source files before proposing changes\n- Trace call chains and dependency graphs\n- Understand the full context of the problem space\n- Document findings before implementing\n\n[root-cause-analysis — inspired by superpowers:systematic-debugging]\nFor every problem, follow the 4-phase debugging process:\nPhase 1 — Root Cause Investigation:\n  1. Read error messages carefully — stack traces, line numbers, codes\n  2. Reproduce consistently — exact steps, every time?\n  3. Check recent changes — git diff, recent commits\n  4. Gather evidence at component boundaries — log what enters/exits each layer\n  5. Trace data flow backward to find source of bad value\nPhase 2 — Pattern Analysis:\n  1. Find working examples of similar code in the codebase\n  2. Compare working vs broken — list EVERY difference\n  3. Don't assume "that can't matter"\nPhase 3 — Hypothesis:\n  1. State clearly: "I think X is root cause because Y"\n  2. Make SMALLEST change to test hypothesis\n  3. ONE variable at a time\nPhase 4 — Implementation:\n  1. Create failing test case first (TDD)\n  2. Fix root cause, NOT symptom\n  3. If 3+ fixes failed: STOP and question the architecture`
           },
           prometheus: {
             systemPrompt: 'You are Prometheus — the Strategic Planner. You analyze features and ideas comprehensively, producing detailed execution plans with architecture decisions, task breakdowns, risk assessments, and dependency graphs. You plan before anyone builds.',
-            modeDirectives: `[planning-mode]\nSTRATEGIC PLANNING MODE:\n- Analyze requirements and constraints thoroughly\n- Identify all affected systems and dependencies\n- Create detailed task breakdown with effort estimates\n- Assess risks and propose mitigations\n- Define clear acceptance criteria for each deliverable\n\n[architecture-mode]\nFor architecture decisions:\n1. Evaluate multiple approaches with pros/cons\n2. Consider scalability, maintainability, and team capacity\n3. Document decision rationale\n4. Create dependency graph and implementation order`
+            modeDirectives: `${SUPERPOWERS_CORE}\n\n[planning-mode — inspired by superpowers:writing-plans]\nSTRATEGIC PLANNING MODE:\n- Analyze requirements and constraints thoroughly\n- Identify all affected systems and dependencies\n- Create detailed task breakdown: each task = 2-5 minutes, ONE action\n- For each task: exact file paths, expected code, verification steps\n- Assess risks and propose mitigations\n- Define clear acceptance criteria for each deliverable\n- DRY, YAGNI, TDD principles\n\n[brainstorming — inspired by superpowers:brainstorming]\nBEFORE creating any plan:\n1. Explore project context first (files, docs, recent commits)\n2. Ask clarifying questions ONE at a time\n3. Propose 2-3 approaches with trade-offs and your recommendation\n4. Present design in sections scaled to complexity\n5. Get user approval before proceeding to implementation plan\nHARD GATE: Do NOT write implementation plan until design is approved.`
           },
           atlas: {
             systemPrompt: 'You are Atlas — the Heavy Lifter. A powerful execution agent for large-scale tasks involving multiple files, systems, or complex refactoring. You handle the heaviest workloads with systematic, methodical precision.',
-            modeDirectives: `[parallel-execution-mode]\nPARALLEL EXECUTION MODE for large-scale operations:\n- Identify all files and systems that need changes\n- Group changes into independent batches that can run in parallel\n- Execute systematically: batch by batch, verify after each\n- Track progress across all affected areas\n\n[bulk-operation-mode]\nFor operations spanning many files:\n1. Scan and catalog all affected files first\n2. Create a change plan before touching any file\n3. Apply changes in order of dependency\n4. Verify each change doesn't break others\n5. Run full test suite after all changes`
+            modeDirectives: `${SUPERPOWERS_CORE}\n\n[parallel-execution-mode — inspired by superpowers:dispatching-parallel-agents]\nPARALLEL EXECUTION MODE for large-scale operations:\n- Identify all files and systems that need changes\n- Group changes into INDEPENDENT batches\n- Dispatch one focused task per independent problem domain\n- Each task gets: specific scope, clear goal, constraints, expected output\n- Execute batches concurrently, verify after each\n- Track progress across all affected areas\n\n[subagent-pattern — inspired by superpowers:subagent-driven-development]\nFor each task:\n1. Dispatch implementer with full task context (don't make them search)\n2. After implementation: spec compliance review (does it match requirements?)\n3. After spec passes: code quality review (is implementation clean?)\n4. If review finds issues: fix and re-review, don't skip\n5. Mark task complete ONLY after both reviews pass`
           },
         }
 
@@ -493,6 +538,36 @@ app.whenReady().then(() => {
           const agentConfig = AGENT_MODE_CONFIGS[agentMode]
           agentContext = agentConfig.systemPrompt + '\n\n' + agentConfig.modeDirectives
           emitThinking('agent_mode', 'done', 'Agent Mode', agentMode.charAt(0).toUpperCase() + agentMode.slice(1))
+        } else {
+          agentContext = SUPERPOWERS_CORE
+        }
+
+        // Smart Intent Classification — determines if query needs tools, web search, or just RAG
+        let smartIntent: SmartIntentResult | null = null
+        stepStart = Date.now()
+        emitThinking('intent', 'running', 'Phân tích ý định')
+        try {
+          smartIntent = await classifyIntentSmart(query)
+          emitThinking('intent', 'done', 'Phân tích ý định',
+            `${smartIntent.category} (${smartIntent.confidence.toFixed(2)})${smartIntent.needsToolUse ? ' + tools' : ''}${smartIntent.needsExternalInfo ? ' + external' : ''}`,
+            Date.now() - stepStart)
+        } catch (intentErr) {
+          console.warn('[Chat] Smart intent classification failed (non-fatal):', intentErr)
+          emitThinking('intent', 'error', 'Phân tích ý định', 'Fallback to default', Date.now() - stepStart)
+        }
+
+        let forcePerplexityMode = false
+        if (query.startsWith('/perplexity ') || query.startsWith('/perplexity\n')) {
+          query = query.replace(/^\/perplexity[\s]/, '')
+          forcePerplexityMode = true
+          console.log(`[Chat] Perplexity Deep Search mode activated, query: "${query.slice(0, 80)}..."`)
+          agentContext = `[PERPLEXITY DEEP SEARCH MODE — BẮT BUỘC]
+BẠN PHẢI GỌI TOOL. KHÔNG ĐƯỢC TRẢ LỜI TRỰC TIẾP.
+Bước 1: Gọi cortex_perplexity_search với query của user.
+Bước 2: Nếu query chứa URL, gọi cortex_perplexity_read_url để đọc URL đó.
+Bước 3: Tổng hợp kết quả từ tool thành câu trả lời có citations.
+CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search hoặc cortex_perplexity_read_url, đó là SAI. LUÔN gọi tool trước.`
+          emitThinking('agent_mode', 'done', 'Perplexity Deep Search', 'Sẽ dùng Perplexity để tìm kiếm')
         }
 
         // V3: Category Routing — resolve category config for this query
@@ -506,6 +581,19 @@ app.whenReady().then(() => {
         const userModel = getActiveModel()
         const useRoutedModel = routingDecision.confidence >= 0.9
         routedModel = useRoutedModel ? routingDecision.model : userModel
+        if (forcePerplexityMode) {
+          const weakModels = ['haiku', 'mini', 'flash', 'nano']
+          const isWeak = weakModels.some(w => userModel.toLowerCase().includes(w))
+          if (isWeak) {
+            const models = getAvailableModels()
+            const strongModel = models.find(m => !weakModels.some(w => m.id.toLowerCase().includes(w)))
+            routedModel = strongModel?.id || userModel
+            console.log(`[Chat] Perplexity mode: user model "${userModel}" too weak for function calling, upgraded to "${routedModel}"`)
+          } else {
+            routedModel = userModel
+            console.log(`[Chat] Perplexity mode: using user model ${userModel}`)
+          }
+        }
         console.log(`[Chat] V3 Routing: ${routingDecision.category} → ${routedModel} (confidence: ${routingDecision.confidence.toFixed(2)}, reason: ${routingDecision.reason}${useRoutedModel ? '' : ', keeping user model'})`)
         emitThinking('routing', 'done', 'Chọn model',
           `${routingDecision.category} → ${routedModel}`,
@@ -668,15 +756,55 @@ app.whenReady().then(() => {
           return { success: true, content: agentResponse, contextChunks: [] }
         }
 
+        // Skill-chain routing: when smart intent detects complex reasoning needs, use react-skill
+        if (
+          smartIntent &&
+          smartIntent.category === 'reasoning' &&
+          smartIntent.confidence >= 0.7 &&
+          !forcePerplexityMode
+        ) {
+          emitThinking('skill_chain', 'running', 'Skill Chain', 'ReAct agent cho complex query')
+          try {
+            const reactResult = await executeSkill('react-agent', {
+              query,
+              projectId,
+              conversationId,
+              mode: mode as 'pm' | 'engineering',
+              context: { history }
+            })
+            if (reactResult?.content && reactResult.content.trim().length > 0) {
+              emitThinking('skill_chain', 'done', 'Skill Chain', `ReAct: ${(reactResult.metadata as Record<string, unknown>)?.steps || '?'} steps`)
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: reactResult.content, done: true })
+              try {
+                const skillDb = getDb()
+                const emptyAssistant = skillDb.prepare(
+                  "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' AND content = '' ORDER BY created_at DESC LIMIT 1"
+                ).get(conversationId) as { id: string } | undefined
+                if (emptyAssistant) {
+                  messageQueries.updateContent(skillDb).run(reactResult.content, emptyAssistant.id)
+                }
+              } catch { /* best-effort persist */ }
+              return { success: true, content: reactResult.content, contextChunks: [] }
+            }
+            emitThinking('skill_chain', 'done', 'Skill Chain', 'ReAct returned empty, falling through to RAG')
+          } catch (skillErr) {
+            console.warn('[Chat] Skill chain failed, falling through to normal flow:', skillErr)
+            emitThinking('skill_chain', 'error', 'Skill Chain', 'Fallback to RAG')
+          }
+        }
+
         // 1. Get project info and search for relevant context (per-repo branch-aware)
         const db = getDb()
         const repos = repoQueries.getByProject(db).all(projectId) as any[]
         let context: any[] = []
 
-        // Agentic RAG: multi-step intelligent retrieval
+        // Agentic RAG: multi-step intelligent retrieval (skip for Perplexity mode)
         stepStart = Date.now()
-        emitThinking('rag', 'running', 'Tìm kiếm trong Brain')
+        if (forcePerplexityMode) {
+          emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — dùng Perplexity search')
+        }
         try {
+          if (forcePerplexityMode) throw new Error('skip')
           // Collect active branches from all repos
           const branchSet = new Set<string>()
           for (const repo of repos) {
@@ -771,19 +899,22 @@ app.whenReady().then(() => {
           emitThinking('external_context', 'error', 'Lấy context bên ngoài', 'Lỗi kết nối', Date.now() - stepStart)
         }
 
-        // 1c. Web search supplement (low confidence or error pattern)
+        // Web search supplement — triggers on: error patterns, empty RAG, OR smart intent says external info needed
         let webContext = ''
         stepStart = Date.now()
         try {
           const webTrigger = detectWebSearchTrigger(query)
-          const shouldWebSearch = webTrigger.triggered || (context.length === 0 && query.length > 20)
+          const intentNeedsExternal = smartIntent?.needsExternalInfo === true
+          const ragInsufficient = context.length === 0 && query.length > 20
+          const shouldWebSearch = webTrigger.triggered || ragInsufficient || intentNeedsExternal
           if (shouldWebSearch) {
-            emitThinking('web_search', 'running', 'Tìm kiếm web')
+            emitThinking('web_search', 'running', 'Tìm kiếm web',
+              intentNeedsExternal ? 'Intent cần thông tin bên ngoài' : undefined)
             const webQuery = webTrigger.triggered ? webTrigger.searchQuery : query
             const webResults = await searchWeb(webQuery, { numResults: 5 })
             webContext = webResultsToChunkContent(webResults)
             if (webContext) {
-              console.log(`[Chat] Web search: ${webResults.length} results (${webContext.length} chars)`)
+              console.log(`[Chat] Web search: ${webResults.length} results (${webContext.length} chars), reason: ${intentNeedsExternal ? 'intent' : webTrigger.triggered ? 'trigger' : 'empty_rag'}`)
             }
             emitThinking('web_search', 'done', 'Tìm kiếm web', `${webResults.length} kết quả`, Date.now() - stepStart)
           } else {
@@ -861,9 +992,29 @@ app.whenReady().then(() => {
           }
         }
 
-        // 3b. Build prompt
         stepStart = Date.now()
         emitThinking('build_prompt', 'running', 'Xây dựng prompt')
+
+        let intentHint = ''
+        if (smartIntent && smartIntent.confidence >= 0.5) {
+          const hints: string[] = []
+          if (smartIntent.needsToolUse) {
+            hints.push('Câu hỏi này CÓ THỂ cần dùng tools (git, grep, file system) để trả lời chính xác. HÃY DÙNG tools nếu context code không đủ.')
+          }
+          if (smartIntent.needsExternalInfo) {
+            hints.push('Câu hỏi này cần thông tin bên ngoài (web search, URL fetch). Dùng cortex_perplexity_search nếu cần.')
+          }
+          if (!smartIntent.isAboutCode) {
+            hints.push('Câu hỏi này KHÔNG phải về code — có thể về team, project metadata, hoặc thông tin chung.')
+          }
+          if (smartIntent.hasUrl) {
+            hints.push('Câu hỏi chứa URL — hãy dùng cortex_perplexity_read_url để đọc nội dung URL.')
+          }
+          if (hints.length > 0) {
+            intentHint = '\n\n=== INTENT ANALYSIS ===\n' + hints.join('\n')
+          }
+        }
+
         const { messages, compressionStats } = buildPrompt(
           mode,
           query,
@@ -874,7 +1025,7 @@ app.whenReady().then(() => {
           history,
           projectStats,
           [externalContext, webContext, attachmentContext].filter(Boolean).join('\n\n---\n\n') || null,
-          [agentContext, memoryContext].filter(Boolean).join('\n\n---\n\n') || null
+          [agentContext, memoryContext, intentHint].filter(Boolean).join('\n\n---\n\n') || null
         )
         if (compressionStats) {
           console.log(`[Chat] Context compression: ${compressionStats.savingsPercent}% token savings`)
@@ -925,17 +1076,30 @@ app.whenReady().then(() => {
           console.warn('[Chat] Cache check failed (non-fatal):', cacheErr)
         }
 
-        // 4. Collect built-in + MCP tools for function calling
         const builtinTools = getBuiltinToolDefinitions(projectId)
+        const projectTools = getProjectToolDefinitions(projectId)
+        const perplexityTools = getPerplexityToolDefinitions()
         let mcpToolDefs: Awaited<ReturnType<typeof getToolDefinitions>> = []
         try {
           mcpToolDefs = await getToolDefinitions()
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
         }
-        const allTools = [...builtinTools, ...mcpToolDefs]
+        const coreTools = [...builtinTools, ...projectTools, ...perplexityTools]
+        let allTools: typeof coreTools
+        if (forcePerplexityMode) {
+          allTools = perplexityTools
+        } else if (mcpToolDefs.length === 0) {
+          allTools = coreTools
+        } else {
+          stepStart = Date.now()
+          emitThinking('tool_routing', 'running', 'Chọn tools')
+          const recentHistory = (messages || []).slice(-6).map(m => ({ role: m.role, content: m.content || '' }))
+          allTools = await routeTools(query, coreTools, mcpToolDefs, recentHistory)
+          emitThinking('tool_routing', 'done', 'Chọn tools', `${allTools.length} tools selected`, Date.now() - stepStart)
+        }
         if (allTools.length > 0) {
-          console.log(`[Chat] Tools available: ${allTools.length} (${allTools.map(t => t.function.name).join(', ')})`)
+          console.log(`[Chat] Tools available: ${allTools.length}${forcePerplexityMode ? ' (Perplexity only)' : ''} (${allTools.map(t => t.function.name).join(', ')})`)
         }
 
         // 5. Stream response with tool call loop (OpenCode pattern)
@@ -951,7 +1115,8 @@ app.whenReady().then(() => {
           mainWindow,
           abortController.signal,
           allTools.length > 0 ? allTools : undefined,
-          routedModel || undefined
+          routedModel || undefined,
+          forcePerplexityMode ? 'required' : undefined
         )
 
         while (
@@ -970,12 +1135,26 @@ app.whenReady().then(() => {
           }
           messages.push(assistantMsg)
 
-          for (const toolCall of streamResult.toolCalls) {
-            const toolResult = toolCall.function.name.startsWith('cortex_')
+          const executeOneTool = async (toolCall: typeof streamResult.toolCalls[0]) => {
+            const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
+            const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
+            const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool
+
+            const toolResult = isPerplexity
+              ? await executePerplexityTool(toolCall.function.name, toolCall.function.arguments)
+              : isProjectTool
+              ? await executeProjectTool(toolCall.function.name, toolCall.function.arguments, projectId)
+              : isBuiltinFs
               ? await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
             console.log(`[Chat] Tool ${toolCall.function.name}: ${toolResult.isError ? 'ERROR' : 'OK'} (${toolResult.content.length} chars)`)
+            return { toolCall, toolResult }
+          }
 
+          // Execute ALL tool calls in parallel (superpowers:dispatching-parallel-agents pattern)
+          const toolResults = await Promise.all(streamResult.toolCalls.map(executeOneTool))
+
+          for (const { toolCall, toolResult } of toolResults) {
             messages.push({
               role: 'tool',
               content: toolResult.content,
@@ -985,17 +1164,49 @@ app.whenReady().then(() => {
 
           emitThinking('tool_call', 'done', 'Gọi tools', `${streamResult.toolCalls.length} tools xong`)
 
+          const loopTools = forcePerplexityMode ? undefined : (allTools.length > 0 ? allTools : undefined)
           streamResult = await streamChatCompletion(
             messages,
             conversationId,
             mainWindow,
             abortController.signal,
-            allTools.length > 0 ? allTools : undefined,
+            loopTools,
             routedModel || undefined
           )
         }
 
-        const response = streamResult.content
+        let response = streamResult.content
+
+        if (!response && !forcePerplexityMode) {
+          console.warn(`[Chat] Empty response from ${routedModel}, retrying without tools...`)
+          emitThinking('streaming', 'running', 'Đang trả lời', 'Retry không có tools')
+          streamResult = await streamChatCompletion(
+            messages,
+            conversationId,
+            mainWindow,
+            abortController.signal,
+            undefined,
+            routedModel || undefined
+          )
+          response = streamResult.content
+          if (!response) {
+            console.warn(`[Chat] Still empty, retrying with different model...`)
+            const models = getAvailableModels()
+            const fallback = models.find(m => m.id !== routedModel && !['haiku', 'mini', 'flash', 'nano'].some(w => m.id.toLowerCase().includes(w)))
+            if (fallback) {
+              streamResult = await streamChatCompletion(
+                messages,
+                conversationId,
+                mainWindow,
+                abortController.signal,
+                undefined,
+                fallback.id
+              )
+              response = streamResult.content
+              if (response) console.log(`[Chat] Fallback model ${fallback.id} succeeded`)
+            }
+          }
+        }
 
         activeAbortControllers.delete(conversationId)
         emitThinking('streaming', 'done', 'Đang trả lời', toolIteration > 0 ? `${toolIteration} tool calls` : undefined)
@@ -1172,6 +1383,16 @@ app.whenReady().then(() => {
     return true
   })
 
+  // OpenRouter fallback provider
+  ipcMain.handle('openrouter:getConfig', () => ({
+    apiKey: getOpenRouterApiKey() ? '***configured***' : '',
+    enabled: getOpenRouterEnabled(),
+    freeModels: getFreeModels()
+  }))
+  ipcMain.handle('openrouter:setApiKey', (_event, key: string) => { setOpenRouterApiKey(key); return true })
+  ipcMain.handle('openrouter:setEnabled', (_event, enabled: boolean) => { setOpenRouterEnabled(enabled); return true })
+  ipcMain.handle('openrouter:test', async () => testOpenRouterConnection())
+
   // =====================
   // IPC: Conversation CRUD
   // =====================
@@ -1196,6 +1417,12 @@ app.whenReady().then(() => {
   ipcMain.handle('conversation:delete', (_event, conversationId: string) => {
     const db = getDb()
     conversationQueries.delete(db).run(conversationId)
+    return true
+  })
+
+  ipcMain.handle('conversation:pin', (_event, conversationId: string) => {
+    const db = getDb()
+    conversationQueries.togglePin(db).run(conversationId)
     return true
   })
 
@@ -1339,11 +1566,95 @@ app.whenReady().then(() => {
     setLLMConfig(maxTokens, contextMessages)
     return true
   })
-  ipcMain.handle('settings:getEmbeddingConfig', () => ({
-    mode: 'local',
-    model: 'Xenova/all-MiniLM-L6-v2',
-    dimensions: EMBEDDING_DIMENSIONS
-  }))
+  ipcMain.handle('settings:getEmbeddingConfig', () => {
+    return {
+      mode: 'cloud',
+      model: 'jina-embeddings-v3',
+      dimensions: EMBEDDING_DIMENSIONS,
+      url: 'https://api.jina.ai',
+      hasApiKey: !!getJinaApiKey()
+    }
+  })
+  ipcMain.handle('settings:getQdrantConfig', () => {
+    return getQdrantConfig() || { url: '', apiKey: '' }
+  })
+  ipcMain.handle('settings:setQdrantConfig', (_event, url: string, apiKey: string) => {
+    setQdrantConfig(url, apiKey)
+    resetQdrantClient()
+    return true
+  })
+  ipcMain.handle('settings:getJinaApiKey', () => {
+    return getJinaApiKey() || ''
+  })
+  ipcMain.handle('settings:setJinaApiKey', (_event, key: string) => {
+    setJinaApiKey(key)
+    return true
+  })
+  ipcMain.handle('settings:getPerplexityCookies', () => {
+    return getSetting('perplexity_cookies') || ''
+  })
+  ipcMain.handle('settings:setPerplexityCookies', (_event, cookies: string) => {
+    setSetting('perplexity_cookies', cookies, true)
+    return true
+  })
+  ipcMain.handle('settings:loginPerplexity', async () => {
+    return new Promise<{ success: boolean; error?: string }>((resolve) => {
+      const pplxSession = getPerplexitySession()
+      const authWin = new BrowserWindow({
+        width: 900,
+        height: 700,
+        title: 'Đăng nhập Perplexity',
+        parent: mainWindow || undefined,
+        modal: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          partition: 'persist:perplexity',
+        },
+      })
+
+      authWin.loadURL('https://www.perplexity.ai/')
+
+      let resolved = false
+      const finish = (result: { success: boolean; error?: string }) => {
+        if (resolved) return
+        resolved = true
+        resolve(result)
+      }
+
+      const cookieCheckInterval = setInterval(async () => {
+        try {
+          const cookies = await pplxSession.cookies.get({ domain: 'perplexity.ai' })
+          const hasSession = cookies.some(c => c.name === '__Secure-next-auth.session-token')
+          if (!hasSession) return
+
+          setSetting('perplexity_logged_in', 'true', false)
+          clearInterval(cookieCheckInterval)
+          if (!authWin.isDestroyed()) authWin.close()
+          finish({ success: true })
+        } catch {}
+      }, 2000)
+
+      authWin.on('closed', () => {
+        clearInterval(cookieCheckInterval)
+        finish({ success: false, error: 'Cửa sổ đăng nhập đã đóng' })
+      })
+    })
+  })
+
+  ipcMain.handle('settings:testPerplexity', async () => {
+    try {
+      const loggedIn = await isPerplexityLoggedIn()
+      if (!loggedIn) return { success: false, error: 'Chưa đăng nhập Perplexity. Bấm "Đăng nhập Perplexity" trước.' }
+      const start = Date.now()
+      const result = await executePerplexityTool('cortex_perplexity_search', JSON.stringify({ query: 'ping test: respond with "OK"' }))
+      const latencyMs = Date.now() - start
+      if (result.isError) return { success: false, error: result.content }
+      return { success: true, latencyMs, preview: result.content.slice(0, 150) }
+    } catch (err) {
+      return { success: false, error: String(err instanceof Error ? err.message : err) }
+    }
+  })
   ipcMain.handle('settings:testEmbeddingConnection', async () => {
     try {
       const start = Date.now()
@@ -1608,7 +1919,7 @@ app.whenReady().then(() => {
   try { initCacheSchema() } catch (err) { console.error('[Main] Cache schema init failed:', err) }
   loadAndRegisterAllAgents()
   loadAndRegisterAll()
-    .then(() => autoConnectMCPServers())
+    .then(() => { ensureCoreMCPServers(); return autoConnectMCPServers() })
     .catch(err => console.error('[Main] Skill/MCP loading failed:', err))
 
   ipcMain.handle('memory:core:get', (_event, projectId: string) => {
@@ -1620,8 +1931,7 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('memory:core:delete', (_event, projectId: string, section: string) => {
-    const { deleteCoreMemory } = require('./services/memory/core-memory')
-    return deleteCoreMemory(projectId, section)
+    return deleteCoreMemory(projectId, section as any)
   })
 
   ipcMain.handle('memory:core:prompt', (_event, projectId: string) => {
@@ -1711,6 +2021,7 @@ app.whenReady().then(() => {
       { command: '/diff-review', label: 'Diff Review', description: 'Review git diff với multi-perspective analysis', icon: 'GitCompare', skillName: 'diff-review' },
       { command: '/rtk-setup', label: 'RTK Setup', description: 'Redux Toolkit setup và enforcement', icon: 'Settings', skillName: 'react-agent' },
       { command: '/multi-agent', label: 'Multi-Agent', description: 'Phân tích toàn diện với 8 agents chuyên biệt (review, security, performance...)', icon: 'Users', skillName: '__orchestrate__' },
+      { command: '/perplexity', label: 'Perplexity Deep Search', description: 'Deep research với Perplexity Pro — tìm kiếm web, đọc URL, phân tích', icon: 'Search' },
       { command: '/agents', label: 'Agent Mode', description: 'Chọn agent mode (Sisyphus, Hephaestus, Prometheus, Atlas)', icon: 'Bot' },
     ]
   })
@@ -1753,28 +2064,24 @@ app.whenReady().then(() => {
   // =====================
   ipcMain.handle('cost:stats', (_event, projectId: string) => {
     try {
-      const { getCostByProject } = require('./services/skills/efficiency/cost-tracker')
       return getCostByProject(projectId)
     } catch { return null }
   })
 
   ipcMain.handle('cost:history', (_event, projectId: string, days?: number) => {
     try {
-      const { getDailyCosts } = require('./services/skills/efficiency/cost-tracker')
       return getDailyCosts(projectId, days)
     } catch { return [] }
   })
 
   ipcMain.handle('cache:stats', () => {
     try {
-      const { getCacheStats } = require('./services/skills/efficiency/semantic-cache')
       return getCacheStats()
     } catch { return null }
   })
 
   ipcMain.handle('cache:invalidate', () => {
     try {
-      const { invalidateCache } = require('./services/skills/efficiency/semantic-cache')
       return invalidateCache()
     } catch { return false }
   })
@@ -1870,6 +2177,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('mcp:health', async (_event, id: string) => {
     return await checkMCPServerHealth(id)
+  })
+
+  ipcMain.handle('mcp:getPresets', () => {
+    return getPresetStatuses()
+  })
+
+  ipcMain.handle('mcp:installPreset', async (_event, presetId: string, envValues: Record<string, string>) => {
+    return await installPreset(presetId, envValues)
   })
 
   // =====================

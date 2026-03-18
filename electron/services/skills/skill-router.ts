@@ -1,74 +1,41 @@
 /**
  * Skill Router — Intent classification and skill routing
+ *
+ * V2: Uses smart LLM-based classifier with keyword fallback.
+ * Now actually connected to the chat flow (was dead code before).
  */
 
 import type { SkillInput, SkillOutput, SkillRouteResult, SkillCategory } from './types'
 import { getActiveSkills, executeSkill } from './skill-registry'
+import { classifyIntentSmart, classifyIntentKeywordFallback, type SmartIntentResult } from './smart-intent-classifier'
 
-interface IntentClassification {
-  category: SkillCategory
-  confidence: number
-  keywords: string[]
+export async function classifyIntent(query: string): Promise<SmartIntentResult> {
+  return classifyIntentSmart(query)
 }
 
-const INTENT_KEYWORDS: Record<SkillCategory, string[]> = {
-  rag: ['search', 'find', 'where', 'locate', 'look up', 'lookup', 'which file', 'what file', 'show me'],
-  memory: ['remember', 'recall', 'memory', 'prefer', 'history', 'past', 'previously', 'forgot', 'my style', 'my preference'],
-  code: ['analyze', 'architecture', 'impact', 'dependency', 'structure', 'diagram', 'refactor', 'code review'],
-  agent: ['fix', 'implement', 'create', 'build', 'run', 'execute', 'debug', 'deploy', 'automate'],
-  reasoning: ['plan', 'think', 'step by step', 'figure out', 'work through', 'solve', 'complex'],
-  learning: ['learn', 'improve', 'optimize', 'feedback', 'train', 'adapt'],
-  efficiency: ['cost', 'token', 'cache', 'compress', 'cheaper', 'faster', 'optimize cost'],
-  tool: ['browse', 'navigate', 'screenshot', 'terminal', 'git', 'commit', 'branch']
-}
-
-export function classifyIntent(query: string): IntentClassification[] {
-  const lower = query.toLowerCase()
-  const classifications: IntentClassification[] = []
-
-  for (const [category, keywords] of Object.entries(INTENT_KEYWORDS)) {
-    const matched = keywords.filter(kw => lower.includes(kw))
-    if (matched.length > 0) {
-      const confidence = Math.min(0.9, 0.3 + matched.length * 0.2)
-      classifications.push({
-        category: category as SkillCategory,
-        confidence,
-        keywords: matched
-      })
-    }
-  }
-
-  // Sort by confidence
-  classifications.sort((a, b) => b.confidence - a.confidence)
-
-  // If no match, default to chat/rag
-  if (classifications.length === 0) {
-    // Question patterns suggest RAG
-    if (/^(how|what|why|when|where|who|which|can|does|is|are)\b/i.test(query)) {
-      classifications.push({ category: 'rag', confidence: 0.4, keywords: ['question_pattern'] })
-    }
-  }
-
-  return classifications
+export function classifyIntentSync(query: string): SmartIntentResult {
+  return classifyIntentKeywordFallback(query)
 }
 
 export async function routeQuery(input: SkillInput): Promise<SkillRouteResult[]> {
-  const intents = classifyIntent(input.query)
+  const intent = await classifyIntent(input.query)
   const activeSkills = getActiveSkills()
   const results: SkillRouteResult[] = []
 
-  for (const intent of intents) {
-    // Find skills matching this intent category
-    const matchingSkills = activeSkills.filter(s => s.category === intent.category)
+  const categoriesToCheck: SkillCategory[] = [intent.category, ...intent.secondaryCategories]
+
+  for (const category of categoriesToCheck) {
+    const matchingSkills = activeSkills.filter(s => s.category === category)
 
     for (const skill of matchingSkills) {
       try {
         const canHandle = await skill.canHandle(input)
         if (canHandle) {
+          const isSecondary = category !== intent.category
           results.push({
             skill,
-            confidence: intent.confidence,
-            reason: `Intent: ${intent.category} (keywords: ${intent.keywords.join(', ')})`
+            confidence: isSecondary ? intent.confidence * 0.7 : intent.confidence,
+            reason: `Smart intent: ${category} (${intent.reasoning})`
           })
         }
       } catch (err) {
@@ -77,7 +44,6 @@ export async function routeQuery(input: SkillInput): Promise<SkillRouteResult[]>
     }
   }
 
-  // Add fallback chat skill (lowest confidence)
   const chatSkill = activeSkills.find(s => s.name === 'chat' || s.name === 'cortex-chat')
   if (chatSkill) {
     const alreadyIncluded = results.some(r => r.skill.name === chatSkill.name)
@@ -90,7 +56,6 @@ export async function routeQuery(input: SkillInput): Promise<SkillRouteResult[]>
     }
   }
 
-  // Sort by confidence
   results.sort((a, b) => b.confidence - a.confidence)
   return results
 }
@@ -117,7 +82,6 @@ export async function executeRouted(input: SkillInput): Promise<SkillOutput> {
   } catch (err) {
     console.error(`[SkillRouter] Execution failed for ${route.skill.name}:`, err)
 
-    // Try fallback
     const routes = await routeQuery(input)
     const fallback = routes.find(r => r.skill.name !== route.skill.name)
     if (fallback) {
