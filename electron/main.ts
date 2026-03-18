@@ -68,6 +68,12 @@ import { getProjectToolDefinitions, executeProjectTool } from './services/skills
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { routeTools } from './services/tool-router'
 import { classifyIntentSmart, type SmartIntentResult } from './services/skills/smart-intent-classifier'
+import {
+  stageSanitize, stageMemory, stageIntentClassification, stageRouting,
+  stageBeforeHooks, stageAfterHooks, determinePipelinePath, persistAssistantResponse,
+  dispatchBackgroundAgents, type ThinkingEmitter, type PipelinePath
+} from './services/chat-pipeline'
+import { loadPluginConfig, isHookDisabled, getPluginConfig } from './services/plugin-config'
 
 // V2: Efficiency Engine
 import { initCostSchema, recordUsage, estimateCost, getCompressionStats, getCostByProject, getDailyCosts } from './services/skills/efficiency/cost-tracker'
@@ -451,31 +457,15 @@ app.whenReady().then(() => {
       let routingDecision: ReturnType<typeof resolveCategory> | undefined
 
       try {
-        console.log(`[Chat] Raw query received: "${query.slice(0, 100)}"`)
+        console.log(`[Chat] Pipeline processing: "${query.slice(0, 100)}"`)
 
-        // 0. Sanitize prompt for injection
+        // Pipeline Stage 0: Sanitize
         let stepStart = Date.now()
-        emitThinking('sanitize', 'running', 'Phân tích câu hỏi')
-        const { sanitized, suspicious, threats } = sanitizePrompt(query)
-        if (suspicious) {
-          logEvent('security.prompt_injection', projectId, 'chat', JSON.stringify({ threats, original: query.slice(0, 200) }))
-          query = sanitized
-        }
-        emitThinking('sanitize', 'done', 'Phân tích câu hỏi', suspicious ? 'Đã xử lý nội dung đáng ngờ' : undefined, Date.now() - stepStart)
+        const sanitizeResult = await stageSanitize(query, projectId, emitThinking)
+        query = sanitizeResult.query
 
-        // 0b. Load memory context
-        stepStart = Date.now()
-        emitThinking('memory', 'running', 'Đọc bộ nhớ')
-        let memoryContext = ''
-        try {
-          memoryContext = buildMemoryPrompt(projectId)
-          emitThinking('memory', memoryContext ? 'done' : 'skipped', 'Đọc bộ nhớ',
-            memoryContext ? `${memoryContext.length} ký tự` : 'Chưa có bộ nhớ',
-            Date.now() - stepStart)
-        } catch (memErr) {
-          console.warn('[Chat] Memory load failed (non-fatal):', memErr)
-          emitThinking('memory', 'error', 'Đọc bộ nhớ', 'Lỗi', Date.now() - stepStart)
-        }
+        // Pipeline Stage 1: Memory
+        const memoryContext = await stageMemory(projectId, emitThinking)
 
         // 0c. Inject agent mode context (Sisyphus, Hephaestus, etc.)
         const SUPERPOWERS_CORE = `[systematic-resolution]
@@ -542,19 +532,12 @@ For AMBIGUOUS queries (multiple valid interpretations):
           agentContext = SUPERPOWERS_CORE
         }
 
-        // Smart Intent Classification — determines if query needs tools, web search, or just RAG
-        let smartIntent: SmartIntentResult | null = null
-        stepStart = Date.now()
-        emitThinking('intent', 'running', 'Phân tích ý định')
-        try {
-          smartIntent = await classifyIntentSmart(query)
-          emitThinking('intent', 'done', 'Phân tích ý định',
-            `${smartIntent.category} (${smartIntent.confidence.toFixed(2)})${smartIntent.needsToolUse ? ' + tools' : ''}${smartIntent.needsExternalInfo ? ' + external' : ''}`,
-            Date.now() - stepStart)
-        } catch (intentErr) {
-          console.warn('[Chat] Smart intent classification failed (non-fatal):', intentErr)
-          emitThinking('intent', 'error', 'Phân tích ý định', 'Fallback to default', Date.now() - stepStart)
-        }
+        // Pipeline Stage 2: Intent Classification
+        const smartIntent = await stageIntentClassification(query, emitThinking)
+
+        // Pipeline Stage 3: Determine execution path
+        const pipelinePath = determinePipelinePath(query, smartIntent, agentMode)
+        console.log(`[Pipeline] Path: ${pipelinePath.path} (${pipelinePath.reason})`)
 
         let forcePerplexityMode = false
         if (query.startsWith('/perplexity ') || query.startsWith('/perplexity\n')) {
@@ -756,39 +739,60 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           return { success: true, content: agentResponse, contextChunks: [] }
         }
 
-        // Skill-chain routing: when smart intent detects complex reasoning needs, use react-skill
-        if (
-          smartIntent &&
-          smartIntent.category === 'reasoning' &&
-          smartIntent.confidence >= 0.7 &&
-          !forcePerplexityMode
-        ) {
+        // Pipeline path: orchestrate (multi-agent for complex queries)
+        if (pipelinePath.path === 'orchestrate' && !forcePerplexityMode) {
+          emitThinking('orchestrate', 'running', 'Multi-Agent Orchestrator', pipelinePath.reason)
+          try {
+            const bgTasks = await dispatchBackgroundAgents(query, projectId, conversationId, smartIntent, emitThinking)
+            const orchResult = await orchestrate({
+              query, projectId, conversationId, mode: mode as 'pm' | 'engineering'
+            })
+            const agentList = orchResult.activatedAgents.join(', ')
+            emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator',
+              `${orchResult.activatedAgents.length} agents: ${agentList} (${orchResult.totalDurationMs}ms)`)
+
+            const header = `## Multi-Agent Analysis\n**Intent:** ${orchResult.intent.primaryIntent} (confidence: ${(orchResult.intent.confidence * 100).toFixed(0)}%)\n**Team:** ${agentList}\n**Duration:** ${orchResult.totalDurationMs}ms\n\n`
+            const agentResponse = header + orchResult.response
+
+            await stageAfterHooks({
+              projectId, conversationId, query, response: agentResponse,
+              model: routedModel, metadata: { path: 'orchestrate', bgTasks }
+            }, emitThinking)
+
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: agentResponse, done: true })
+            persistAssistantResponse(conversationId, agentResponse)
+            return { success: true, content: agentResponse, contextChunks: [] }
+          } catch (orchErr) {
+            console.warn('[Pipeline] Orchestrator failed, falling through to standard:', orchErr)
+            emitThinking('orchestrate', 'error', 'Multi-Agent Orchestrator', 'Fallback to standard flow')
+          }
+        }
+
+        // Pipeline path: skill_chain (reasoning → react-skill)
+        if (pipelinePath.path === 'skill_chain' && !forcePerplexityMode) {
           emitThinking('skill_chain', 'running', 'Skill Chain', 'ReAct agent cho complex query')
           try {
             const reactResult = await executeSkill('react-agent', {
-              query,
-              projectId,
-              conversationId,
+              query, projectId, conversationId,
               mode: mode as 'pm' | 'engineering',
               context: { history }
             })
             if (reactResult?.content && reactResult.content.trim().length > 0) {
-              emitThinking('skill_chain', 'done', 'Skill Chain', `ReAct: ${(reactResult.metadata as Record<string, unknown>)?.steps || '?'} steps`)
+              emitThinking('skill_chain', 'done', 'Skill Chain',
+                `ReAct: ${(reactResult.metadata as Record<string, unknown>)?.steps || '?'} steps`)
+
+              await stageAfterHooks({
+                projectId, conversationId, query, response: reactResult.content,
+                model: routedModel, metadata: { path: 'skill_chain' }
+              }, emitThinking)
+
               mainWindow?.webContents.send('chat:stream', { conversationId, content: reactResult.content, done: true })
-              try {
-                const skillDb = getDb()
-                const emptyAssistant = skillDb.prepare(
-                  "SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' AND content = '' ORDER BY created_at DESC LIMIT 1"
-                ).get(conversationId) as { id: string } | undefined
-                if (emptyAssistant) {
-                  messageQueries.updateContent(skillDb).run(reactResult.content, emptyAssistant.id)
-                }
-              } catch { /* best-effort persist */ }
+              persistAssistantResponse(conversationId, reactResult.content)
               return { success: true, content: reactResult.content, contextChunks: [] }
             }
             emitThinking('skill_chain', 'done', 'Skill Chain', 'ReAct returned empty, falling through to RAG')
           } catch (skillErr) {
-            console.warn('[Chat] Skill chain failed, falling through to normal flow:', skillErr)
+            console.warn('[Pipeline] Skill chain failed, falling through to standard:', skillErr)
             emitThinking('skill_chain', 'error', 'Skill Chain', 'Fallback to RAG')
           }
         }
