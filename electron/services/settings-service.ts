@@ -30,12 +30,17 @@ export function getSetting(key: string): string | null {
     .get(key) as { value: string; encrypted: number } | undefined
   if (!row) return null
 
-  if (row.encrypted && safeStorage.isEncryptionAvailable()) {
-    try {
-      return safeStorage.decryptString(Buffer.from(row.value, 'base64'))
-    } catch {
-      return null
+  if (row.encrypted) {
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        return safeStorage.decryptString(Buffer.from(row.value, 'base64'))
+      } catch (err) {
+        console.warn(`[Settings] Failed to decrypt '${key}', safeStorage key may have changed:`, (err as Error).message)
+        return null
+      }
     }
+    console.warn(`[Settings] safeStorage not available, cannot decrypt '${key}'`)
+    return null
   }
   return row.value
 }

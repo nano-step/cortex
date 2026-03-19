@@ -46,7 +46,7 @@ export function getOpenRouterApiKey(): string {
 }
 
 export function setOpenRouterApiKey(key: string): void {
-  setSetting('openrouter_api_key', key)
+  setSetting('openrouter_api_key', key, true)
 }
 
 export function isOpenRouterConfigured(): boolean {

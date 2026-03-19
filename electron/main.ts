@@ -1492,12 +1492,16 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   })
 
   // OpenRouter fallback provider
-  ipcMain.handle('openrouter:getConfig', () => ({
-    apiKey: getOpenRouterApiKey() || '',
-    enabled: getOpenRouterEnabled(),
-    freeModels: getFreeModels()
-  }))
-  ipcMain.handle('openrouter:setApiKey', (_event, key: string) => { setOpenRouterApiKey(key); return true })
+  ipcMain.handle('openrouter:getConfig', () => {
+    const key = getOpenRouterApiKey()
+    console.log(`[Settings:Load] openrouter_api_key: ${key ? `${key.slice(0, 8)}...` : 'NULL'}`)
+    return { apiKey: key || '', enabled: getOpenRouterEnabled(), freeModels: getFreeModels() }
+  })
+  ipcMain.handle('openrouter:setApiKey', (_event, key: string) => {
+    console.log(`[Settings:Save] openrouter_api_key: ${key ? `${key.slice(0, 8)}... (${key.length} chars)` : 'EMPTY'}`)
+    setOpenRouterApiKey(key)
+    return true
+  })
   ipcMain.handle('openrouter:setEnabled', (_event, enabled: boolean) => { setOpenRouterEnabled(enabled); return true })
   ipcMain.handle('openrouter:test', async () => testOpenRouterConnection())
 
@@ -1708,8 +1712,16 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     setJinaApiKey(key)
     return true
   })
-  ipcMain.handle('settings:getVoyageApiKey', () => getVoyageApiKey() || '')
-  ipcMain.handle('settings:setVoyageApiKey', (_event, key: string) => { setVoyageApiKey(key); return true })
+  ipcMain.handle('settings:getVoyageApiKey', () => {
+    const key = getVoyageApiKey()
+    console.log(`[Settings:Load] voyage_api_key: ${key ? `${key.slice(0, 6)}...` : 'NULL'}`)
+    return key || ''
+  })
+  ipcMain.handle('settings:setVoyageApiKey', (_event, key: string) => {
+    console.log(`[Settings:Save] voyage_api_key: ${key ? `${key.slice(0, 6)}... (${key.length} chars)` : 'EMPTY'}`)
+    setVoyageApiKey(key)
+    return true
+  })
   ipcMain.handle('settings:getEmbeddingProvider', () => getEmbeddingProvider())
   ipcMain.handle('settings:getVoyageModels', () => VOYAGE_MODELS)
   ipcMain.handle('settings:getSelectedVoyageModel', () => getSelectedVoyageModel())
