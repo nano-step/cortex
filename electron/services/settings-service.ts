@@ -28,18 +28,26 @@ export function getSetting(key: string): string | null {
   const row = db
     .prepare('SELECT value, encrypted FROM settings WHERE key = ?')
     .get(key) as { value: string; encrypted: number } | undefined
-  if (!row) return null
+
+  if (!row) {
+    if (key.includes('api_key')) console.log(`[Settings:Read] ${key}: NOT IN DB`)
+    return null
+  }
+
+  if (key.includes('api_key')) {
+    console.log(`[Settings:Read] ${key}: found in DB (encrypted=${row.encrypted}, valueLen=${row.value.length})`)
+  }
 
   if (row.encrypted) {
     if (safeStorage.isEncryptionAvailable()) {
       try {
         return safeStorage.decryptString(Buffer.from(row.value, 'base64'))
       } catch (err) {
-        console.warn(`[Settings] Failed to decrypt '${key}', safeStorage key may have changed:`, (err as Error).message)
+        console.warn(`[Settings] Failed to decrypt '${key}':`, (err as Error).message)
         return null
       }
     }
-    console.warn(`[Settings] safeStorage not available, cannot decrypt '${key}'`)
+    console.warn(`[Settings] safeStorage not available for '${key}'`)
     return null
   }
   return row.value
@@ -53,11 +61,17 @@ export function setSetting(key: string, value: string, encrypted: boolean = fals
   if (encrypted && safeStorage.isEncryptionAvailable()) {
     storedValue = safeStorage.encryptString(value).toString('base64')
     actuallyEncrypted = true
+  } else if (encrypted) {
+    console.warn(`[Settings] safeStorage NOT available for '${key}', storing plaintext`)
   }
 
   db.prepare(
     'INSERT OR REPLACE INTO settings (key, value, encrypted, updated_at) VALUES (?, ?, ?, ?)'
   ).run(key, storedValue, actuallyEncrypted ? 1 : 0, Date.now())
+
+  // Verify write
+  const verify = db.prepare('SELECT key, encrypted, length(value) as len FROM settings WHERE key = ?').get(key) as { key: string; encrypted: number; len: number } | undefined
+  console.log(`[Settings:Write] ${key}: stored=${verify ? `${verify.len}chars, encrypted=${verify.encrypted}` : 'FAILED TO WRITE'}`)
 }
 
 export function getProxyUrl(): string {
