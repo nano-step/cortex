@@ -1665,8 +1665,13 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   // =====================
   ipcMain.handle('settings:getProxyConfig', () => getProxyConfig())
   ipcMain.handle('settings:setProxyConfig', (_event, url: string, key: string) => {
+    const prev = getProxyConfig()
+    const changed = prev.url !== url || prev.key !== key
     setProxyConfig(url, key)
-    clearAuthFailedModels()
+    if (changed) {
+      clearAuthFailedModels()
+      console.log('[Settings] Proxy config changed, refreshing models')
+    }
     return true
   })
   ipcMain.handle('settings:getLLMConfig', () => getLLMConfig())
