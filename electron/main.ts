@@ -42,7 +42,7 @@ import { JiraContextSource } from './services/jira-context-source'
 import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
-import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus } from './services/embedder'
+import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus, VOYAGE_MODELS, getSelectedVoyageModel, setSelectedVoyageModel } from './services/embedder'
 import { resetQdrantClient } from './services/qdrant-store'
 import { initSkillMetricsTable, recordSkillCall, getAllSkillMetrics } from './services/skills/skill-metrics'
 
@@ -1493,7 +1493,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
   // OpenRouter fallback provider
   ipcMain.handle('openrouter:getConfig', () => ({
-    apiKey: getOpenRouterApiKey() ? '***configured***' : '',
+    apiKey: getOpenRouterApiKey() || '',
     enabled: getOpenRouterEnabled(),
     freeModels: getFreeModels()
   }))
@@ -1706,6 +1706,9 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   ipcMain.handle('settings:getVoyageApiKey', () => getVoyageApiKey() || '')
   ipcMain.handle('settings:setVoyageApiKey', (_event, key: string) => { setVoyageApiKey(key); return true })
   ipcMain.handle('settings:getEmbeddingProvider', () => getEmbeddingProvider())
+  ipcMain.handle('settings:getVoyageModels', () => VOYAGE_MODELS)
+  ipcMain.handle('settings:getSelectedVoyageModel', () => getSelectedVoyageModel())
+  ipcMain.handle('settings:setSelectedVoyageModel', (_event, modelId: string) => { setSelectedVoyageModel(modelId); return true })
   ipcMain.handle('settings:getPerplexityCookies', () => {
     return getSetting('perplexity_cookies') || ''
   })

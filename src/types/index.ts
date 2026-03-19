@@ -427,6 +427,9 @@ declare global {
       setJinaApiKey: (key: string) => Promise<boolean>
       getVoyageApiKey: () => Promise<string>
       setVoyageApiKey: (key: string) => Promise<boolean>
+      getVoyageModels: () => Promise<Array<{ id: string; name: string; dims: number; description: string }>>
+      getSelectedVoyageModel: () => Promise<string>
+      setSelectedVoyageModel: (modelId: string) => Promise<boolean>
       getOpenRouterConfig: () => Promise<{ apiKey: string; enabled: boolean; freeModels: unknown[] }>
       setOpenRouterApiKey: (key: string) => Promise<boolean>
       getPerplexityCookies: () => Promise<string>

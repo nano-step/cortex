@@ -8,15 +8,35 @@
 
 import { getDb, chunkQueries } from './db'
 import { BrowserWindow } from 'electron'
-import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getEmbeddingProvider } from './settings-service'
+import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getEmbeddingProvider, getSetting, setSetting } from './settings-service'
 
 export const EMBEDDING_DIMENSIONS = 1024
 export const LEGACY_EMBEDDING_DIMENSIONS = 384
 
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings'
-const VOYAGE_MODEL = 'voyage-3-large'
 const JINA_API_URL = 'https://api.jina.ai/v1/embeddings'
 const JINA_MODEL = 'jina-embeddings-v3'
+
+export const VOYAGE_MODELS = [
+  { id: 'voyage-3-large', name: 'Voyage 3 Large', dims: 1024, description: 'Best quality, general purpose' },
+  { id: 'voyage-3', name: 'Voyage 3', dims: 1024, description: 'Balanced quality/speed' },
+  { id: 'voyage-3-lite', name: 'Voyage 3 Lite', dims: 512, description: 'Fastest, lower quality' },
+  { id: 'voyage-code-3', name: 'Voyage Code 3', dims: 1024, description: 'Optimized for code' },
+] as const
+
+export function getSelectedVoyageModel(): string {
+  return getSetting('voyage_model') || 'voyage-3-large'
+}
+
+export function setSelectedVoyageModel(modelId: string): void {
+  const valid = VOYAGE_MODELS.some(m => m.id === modelId)
+  if (valid) setSetting('voyage_model', modelId, false)
+}
+
+function getVoyageModelDims(): number {
+  const model = VOYAGE_MODELS.find(m => m.id === getSelectedVoyageModel())
+  return model?.dims || 1024
+}
 
 const BATCH_SIZE = 8
 const MAX_TEXT_LENGTH = 8192
@@ -174,7 +194,7 @@ async function embedTextsRaw(
       baseUrl = VOYAGE_API_URL
       apiKey = getVoyageApiKey()!
       reqBody = {
-        model: VOYAGE_MODEL,
+        model: getSelectedVoyageModel(),
         input: truncated,
         input_type: task === 'retrieval.query' ? 'query' : 'document'
       }
@@ -336,7 +356,7 @@ export async function preloadEmbeddingModel(): Promise<void> {
   try {
     await embedTexts(['preload test'])
     const provider = getEmbeddingProvider()
-    const model = provider === 'voyage' ? VOYAGE_MODEL : JINA_MODEL
+    const model = provider === 'voyage' ? getSelectedVoyageModel() : JINA_MODEL
     console.log(`[Embedder] Ready: ${model} via ${provider} (${EMBEDDING_DIMENSIONS} dims, batch=${BATCH_SIZE})`)
   } catch (err) {
     console.warn('[Embedder] Not available:', (err as Error).message)
@@ -370,7 +390,7 @@ export function getEmbedderStatus(): { provider: string; model: string; batchSiz
   const provider = getEmbeddingProvider()
   return {
     provider,
-    model: provider === 'voyage' ? VOYAGE_MODEL : JINA_MODEL,
+    model: provider === 'voyage' ? getSelectedVoyageModel() : JINA_MODEL,
     batchSize: BATCH_SIZE,
     tokenLimit: TOKEN_LIMIT_PER_MINUTE,
     tokensUsed: tokenBucket.tokens

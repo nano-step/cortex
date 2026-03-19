@@ -65,6 +65,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   const [voyageApiKey, setVoyageApiKey] = useState('')
   const [showVoyageKey, setShowVoyageKey] = useState(false)
+  const [voyageModels, setVoyageModels] = useState<Array<{ id: string; name: string; dims: number; description: string }>>([])
+  const [selectedVoyageModel, setSelectedVoyageModelState] = useState('voyage-3-large')
   const [openrouterApiKey, setOpenrouterApiKey] = useState('')
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
   const [qdrantUrl, setQdrantUrl] = useState('')
@@ -111,9 +113,12 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         if (jk) setJinaApiKey(jk)
         const vk = await window.electronAPI?.getVoyageApiKey?.()
         if (vk) setVoyageApiKey(vk)
+        const vm = await window.electronAPI?.getVoyageModels?.()
+        if (vm) setVoyageModels(vm)
+        const svm = await window.electronAPI?.getSelectedVoyageModel?.()
+        if (svm) setSelectedVoyageModelState(svm)
         const ork = await window.electronAPI?.getOpenRouterConfig?.()
-        if (ork?.apiKey && ork.apiKey !== '***configured***') setOpenrouterApiKey(ork.apiKey)
-        else if (ork?.apiKey === '***configured***') setOpenrouterApiKey('***configured***')
+        if (ork?.apiKey) setOpenrouterApiKey(ork.apiKey)
         const pc = await window.electronAPI?.getPerplexityCookies?.()
         if (pc) setPerplexityConnected(true)
       } catch {}
@@ -228,10 +233,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       if (jinaApiKey) {
         await window.electronAPI.setJinaApiKey(jinaApiKey)
       }
-      if (voyageApiKey && voyageApiKey !== '***configured***') {
+      if (voyageApiKey) {
         await window.electronAPI.setVoyageApiKey(voyageApiKey)
       }
-      if (openrouterApiKey && openrouterApiKey !== '***configured***') {
+      if (selectedVoyageModel) {
+        await window.electronAPI.setSelectedVoyageModel(selectedVoyageModel)
+      }
+      if (openrouterApiKey) {
         await window.electronAPI.setOpenRouterApiKey(openrouterApiKey)
       }
       setSaveStatus('success')
@@ -434,6 +442,22 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   Embedding cho RAG search — 200M tokens/tháng free. Lấy key tại{' '}
                   <a href="https://dash.voyageai.com/" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">dash.voyageai.com</a>
                 </p>
+                {voyageApiKey && voyageModels.length > 0 && (
+                  <div className="mt-2">
+                    <label className="block text-[11px] text-[var(--text-tertiary)] mb-1">Embedding Model</label>
+                    <select
+                      value={selectedVoyageModel}
+                      onChange={(e) => setSelectedVoyageModelState(e.target.value)}
+                      className="w-full px-3 py-1.5 text-[13px] rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                    >
+                      {voyageModels.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.dims}d) — {m.description}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
