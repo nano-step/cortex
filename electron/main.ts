@@ -44,6 +44,7 @@ import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
 import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus } from './services/embedder'
 import { resetQdrantClient } from './services/qdrant-store'
+import { initSkillMetricsTable, recordSkillCall, getAllSkillMetrics } from './services/skills/skill-metrics'
 
 // V2: Memory System
 import {
@@ -1226,6 +1227,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           messages.push(assistantMsg)
 
           const executeOneTool = async (toolCall: typeof streamResult.toolCalls[0]) => {
+            const toolStart = Date.now()
             const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
             const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
@@ -1246,7 +1248,10 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
               : isBuiltinFs
               ? await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
-            console.log(`[Chat] Tool ${toolCall.function.name}: ${toolResult.isError ? 'ERROR' : 'OK'} (${toolResult.content.length} chars)`)
+
+            const toolLatency = Date.now() - toolStart
+            recordSkillCall(toolCall.function.name, !toolResult.isError, toolLatency)
+            console.log(`[Chat] Tool ${toolCall.function.name}: ${toolResult.isError ? 'ERROR' : 'OK'} (${toolResult.content.length} chars, ${toolLatency}ms)`)
             return { toolCall, toolResult }
           }
 
@@ -2096,6 +2101,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   try { initMemory() } catch (err) { console.error('[Main] Memory init failed:', err) }
   try { initCostSchema() } catch (err) { console.error('[Main] Cost schema init failed:', err) }
   try { initCacheSchema() } catch (err) { console.error('[Main] Cache schema init failed:', err) }
+  try { initSkillMetricsTable() } catch (err) { console.error('[Main] Skill metrics init failed:', err) }
   loadAndRegisterAllAgents()
   loadAndRegisterAll()
     .then(() => { ensureCoreMCPServers(); return autoConnectMCPServers() })

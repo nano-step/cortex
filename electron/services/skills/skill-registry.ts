@@ -12,6 +12,7 @@ import type {
   SkillInfo,
   HealthStatus
 } from './types'
+import { recordSkillCall, loadSkillMetrics } from './skill-metrics'
 
 const registry = new Map<string, SkillRegistryEntry>()
 
@@ -102,17 +103,22 @@ export function listSkills(filter?: {
       if (filter?.status && entry.status !== filter.status) return false
       return true
     })
-    .map(entry => ({
-      name: entry.skill.name,
-      version: entry.skill.version,
-      category: entry.skill.category,
-      priority: entry.skill.priority,
-      status: entry.status,
-      description: entry.skill.description,
-      metrics: entry.skill.getMetrics(),
-      dependencies: entry.skill.dependencies,
-      lastError: entry.lastError
-    }))
+    .map(entry => {
+      const dbMetrics = loadSkillMetrics(entry.skill.name)
+      const inMemMetrics = entry.skill.getMetrics()
+      const mergedMetrics = dbMetrics.totalCalls > inMemMetrics.totalCalls ? dbMetrics : inMemMetrics
+      return {
+        name: entry.skill.name,
+        version: entry.skill.version,
+        category: entry.skill.category,
+        priority: entry.skill.priority,
+        status: entry.status,
+        description: entry.skill.description,
+        metrics: mergedMetrics,
+        dependencies: entry.skill.dependencies,
+        lastError: entry.lastError
+      }
+    })
 }
 
 export async function executeSkill(
@@ -131,8 +137,10 @@ export async function executeSkill(
   const start = Date.now()
   try {
     const result = await entry.skill.execute(input)
+    recordSkillCall(name, true, Date.now() - start)
     return result
   } catch (err) {
+    recordSkillCall(name, false, Date.now() - start)
     entry.lastError = String(err)
     console.error(`[SkillRegistry] Execution failed for ${name}:`, err)
     throw err

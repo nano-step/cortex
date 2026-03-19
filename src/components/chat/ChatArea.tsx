@@ -72,8 +72,14 @@ export function ChatArea() {
 
     const cleanup = window.electronAPI?.onChatStream?.((data) => {
       if (data.conversationId && data.content) {
-        pendingUpdate = { conversationId: data.conversationId, content: data.content }
-        if (!rafId) rafId = requestAnimationFrame(flush)
+        if (data.done) {
+          if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
+          pendingUpdate = null
+          useChatStore.getState().updateLastMessage(data.conversationId, data.content)
+        } else {
+          pendingUpdate = { conversationId: data.conversationId, content: data.content }
+          if (!rafId) rafId = requestAnimationFrame(flush)
+        }
       }
     })
 
@@ -266,8 +272,11 @@ export function ChatArea() {
     if (indexingPhase === 'error') {
       setSyncToast({ type: 'error', message: 'Sync Brain thất bại' })
       setTimeout(() => setSyncToast(null), 6000)
+    } else if (totalFiles === 0 && totalChunks === 0) {
+      setSyncToast({ type: 'success', message: 'Sync hoàn tất — không có thay đổi mới' })
+      setTimeout(() => setSyncToast(null), 4000)
     } else {
-      setSyncToast({ type: 'success', message: `Sync hoàn tất — ${totalFiles} files, ${totalChunks} chunks` })
+      setSyncToast({ type: 'success', message: `Sync hoàn tất — ${totalFiles} files thay đổi, ${totalChunks} chunks mới` })
       setTimeout(() => setSyncToast(null), 4000)
     }
   }, [activeProjectId, activeRepo, syncState])
@@ -351,9 +360,13 @@ export function ChatArea() {
       if (result.success) {
         lastContextChunkIds.current = (result.contextChunks || []).map((c: { relativePath: string }) => c.relativePath)
 
-        // Persist final assistant response to DB
+        // Ensure content is in store before clearing streaming state (prevents race with rAF-batched stream events)
         const finalContent = result.content || useChatStore.getState().conversations
           .find((c) => c.id === convId)?.messages.slice(-1)[0]?.content || ''
+        if (finalContent && convId) {
+          useChatStore.getState().updateLastMessage(convId, finalContent)
+        }
+
         if (assistantMessageId && finalContent && window.electronAPI.updateMessageContent) {
           try {
             await window.electronAPI.updateMessageContent(assistantMessageId, finalContent)

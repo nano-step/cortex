@@ -69,13 +69,17 @@ export const useSyncStore = create<SyncState>((set, get) => ({
 
     try {
       const result = await window.electronAPI.syncRepo(projectId, repoId)
+      const filesChanged = (result.filesAdded || 0) + (result.filesModified || 0)
+      const chunksChanged = (result.chunksAdded || 0)
       set({
         isSyncing: false,
         lastSyncAt: Date.now(),
         syncProgress: null,
         syncStartedAt: null,
-        indexingPhase: null,
-        currentFile: null
+        indexingPhase: result.success ? null : 'error',
+        currentFile: null,
+        totalFiles: filesChanged,
+        totalChunks: chunksChanged
       })
       if (!result.success) {
         console.error('Sync failed:', result.error)
