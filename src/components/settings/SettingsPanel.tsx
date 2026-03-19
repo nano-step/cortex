@@ -61,6 +61,21 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [embeddingTestError, setEmbeddingTestError] = useState('')
   const [embeddingTestDims, setEmbeddingTestDims] = useState(0)
   const [embeddingTestLatency, setEmbeddingTestLatency] = useState(0)
+
+
+  const [voyageApiKey, setVoyageApiKey] = useState('')
+  const [showVoyageKey, setShowVoyageKey] = useState(false)
+  const [openrouterApiKey, setOpenrouterApiKey] = useState('')
+  const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
+  const [qdrantUrl, setQdrantUrl] = useState('')
+  const [qdrantApiKey, setQdrantApiKey] = useState('')
+  const [showQdrantKey, setShowQdrantKey] = useState(false)
+  const [jinaApiKey, setJinaApiKey] = useState('')
+  const [showJinaKey, setShowJinaKey] = useState(false)
+  const [perplexityConnected, setPerplexityConnected] = useState(false)
+  const [pplxTestStatus, setPplxTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [pplxTestError, setPplxTestError] = useState('')
+  const [pplxLoginStatus, setPplxLoginStatus] = useState<'idle' | 'logging_in' | 'success' | 'error'>('idle')
   // Load settings
   useEffect(() => {
     if (!open) return
@@ -87,6 +102,20 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       try {
         const hasToken = await window.electronAPI.getGitHubPAT()
         setGithubConfigured(hasToken)
+      } catch {}
+
+      try {
+        const qc = await window.electronAPI.getQdrantConfig()
+        if (qc) { setQdrantUrl(qc.url || ''); setQdrantApiKey(qc.apiKey || '') }
+        const jk = await window.electronAPI.getJinaApiKey()
+        if (jk) setJinaApiKey(jk)
+        const vk = await window.electronAPI?.getVoyageApiKey?.()
+        if (vk) setVoyageApiKey(vk)
+        const ork = await window.electronAPI?.getOpenRouterConfig?.()
+        if (ork?.apiKey && ork.apiKey !== '***configured***') setOpenrouterApiKey(ork.apiKey)
+        else if (ork?.apiKey === '***configured***') setOpenrouterApiKey('***configured***')
+        const pc = await window.electronAPI?.getPerplexityCookies?.()
+        if (pc) setPerplexityConnected(true)
       } catch {}
 
       try {
@@ -134,6 +163,51 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     }
   }, [])
 
+  const handleLoginPerplexity = useCallback(async () => {
+    setPplxLoginStatus('logging_in')
+    setPplxTestError('')
+    try {
+      if (!window.electronAPI?.loginPerplexity) {
+        setPplxLoginStatus('error')
+        setPplxTestError('Cần rebuild app (npm run build)')
+        return
+      }
+      const result = await window.electronAPI.loginPerplexity()
+      if (result.success) {
+        setPplxLoginStatus('success')
+        setPerplexityConnected(true)
+      } else {
+        setPplxLoginStatus('error')
+        setPplxTestError(result.error || 'Đăng nhập thất bại')
+      }
+    } catch (err) {
+      setPplxLoginStatus('error')
+      setPplxTestError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  const handleTestPerplexity = useCallback(async () => {
+    setPplxTestStatus('testing')
+    setPplxTestError('')
+    try {
+      if (!window.electronAPI?.testPerplexity) {
+        setPplxTestStatus('error')
+        setPplxTestError('Cần rebuild app (npm run build)')
+        return
+      }
+      const result = await window.electronAPI.testPerplexity()
+      if (result.success) {
+        setPplxTestStatus('success')
+      } else {
+        setPplxTestStatus('error')
+        setPplxTestError(result.error || 'Kết nối thất bại')
+      }
+    } catch (err) {
+      setPplxTestStatus('error')
+      setPplxTestError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
   const handleSave = useCallback(async () => {
     setSaving(true)
     setSaveStatus('idle')
@@ -148,6 +222,18 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         setGithubConfigured(true)
         setGithubToken('')
       }
+      if (qdrantUrl) {
+        await window.electronAPI.setQdrantConfig(qdrantUrl, qdrantApiKey)
+      }
+      if (jinaApiKey) {
+        await window.electronAPI.setJinaApiKey(jinaApiKey)
+      }
+      if (voyageApiKey && voyageApiKey !== '***configured***') {
+        await window.electronAPI.setVoyageApiKey(voyageApiKey)
+      }
+      if (openrouterApiKey && openrouterApiKey !== '***configured***') {
+        await window.electronAPI.setOpenRouterApiKey(openrouterApiKey)
+      }
       setSaveStatus('success')
       setTimeout(() => setSaveStatus('idle'), 3000)
     } catch (err) {
@@ -158,7 +244,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false)
     }
-  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken])
+  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey])
 
   if (!open) return null
 
@@ -290,21 +376,17 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <div className="flex items-center gap-2 mb-3">
               <Brain size={16} className="text-[var(--accent-primary)]" />
               <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
-                Embedding
+                Cloud RAG
               </h3>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] font-medium">
-                Cục bộ
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-medium">
+                Cloud
               </span>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center justify-between py-1.5">
-                <span className="text-[12px] text-[var(--text-secondary)]">Mô hình</span>
-                <span className="text-[12px] text-[var(--text-primary)] font-mono">{embeddingModelName || '—'}</span>
-              </div>
-              <div className="flex items-center justify-between py-1.5">
-                <span className="text-[12px] text-[var(--text-secondary)]">Chiều</span>
-                <span className="text-[12px] text-[var(--text-primary)] font-mono">{embeddingDimensions || '—'}</span>
+                <span className="text-[12px] text-[var(--text-secondary)]">Embedding</span>
+                <span className="text-[12px] text-[var(--text-primary)] font-mono">{embeddingModelName || 'jina-embeddings-v3'} ({embeddingDimensions || 1024}d)</span>
               </div>
 
               <div className="flex items-center gap-2 pt-1">
@@ -312,13 +394,12 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                   {embeddingTestStatus === 'testing' ? (
                     <><Loader2 size={14} className="animate-spin" /> Đang kiểm tra...</>
                   ) : (
-                    <>Kiểm tra</>
+                    <>Test Embedding</>
                   )}
                 </Button>
-
                 {embeddingTestStatus === 'success' && (
                   <span className="flex items-center gap-1 text-[12px] text-[var(--status-success-text)]">
-                    <CheckCircle size={14} /> {embeddingTestDims} dims, {embeddingTestLatency}ms
+                    <CheckCircle size={14} /> {embeddingTestDims}d, {embeddingTestLatency}ms
                   </span>
                 )}
                 {embeddingTestStatus === 'error' && (
@@ -326,6 +407,189 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     <AlertCircle size={14} /> {embeddingTestError}
                   </span>
                 )}
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1">
+                  Voyage AI API Key
+                  {voyageApiKey && <span className="ml-2 text-[10px] text-green-500">● Active</span>}
+                </label>
+                <div className="relative">
+                  <Input
+                    type={showVoyageKey ? 'text' : 'password'}
+                    value={voyageApiKey}
+                    onChange={(e) => setVoyageApiKey(e.target.value)}
+                    placeholder="pa-xxxxxxxx (from dash.voyageai.com)"
+                    className="text-[13px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowVoyageKey(!showVoyageKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    {showVoyageKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  Embedding cho RAG search — 200M tokens/tháng free. Lấy key tại{' '}
+                  <a href="https://dash.voyageai.com/" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">dash.voyageai.com</a>
+                </p>
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1">
+                  Qdrant Vector Database
+                </label>
+                <Input
+                  value={qdrantUrl}
+                  onChange={(e) => setQdrantUrl(e.target.value)}
+                  placeholder="http://localhost:6333"
+                  className="text-[13px] mb-2"
+                />
+                <div className="relative">
+                  <Input
+                    type={showQdrantKey ? 'text' : 'password'}
+                    value={qdrantApiKey}
+                    onChange={(e) => setQdrantApiKey(e.target.value)}
+                    placeholder="API key (để trống nếu local Docker)"
+                    className="text-[13px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowQdrantKey(!showQdrantKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    {showQdrantKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <div className="mt-2 p-2.5 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-primary)]">
+                  <p className="text-[10px] text-[var(--text-tertiary)] font-mono leading-relaxed">
+                    <span className="text-[var(--text-secondary)] font-semibold">Docker setup:</span><br/>
+                    docker run -d --name qdrant \<br/>
+                    &nbsp;&nbsp;-p 6333:6333 \<br/>
+                    &nbsp;&nbsp;-v ~/qdrant-data:/qdrant/storage \<br/>
+                    &nbsp;&nbsp;qdrant/qdrant
+                  </p>
+                  <p className="text-[9px] text-[var(--text-tertiary)] mt-1.5">
+                    Tùy chọn — cải thiện tốc độ vector search. Cloud:{' '}
+                    <a href="https://cloud.qdrant.io/" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">cloud.qdrant.io</a>
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1">
+                  OpenRouter API Key
+                  {openrouterApiKey && <span className="ml-2 text-[10px] text-green-500">● Active</span>}
+                </label>
+                <div className="relative">
+                  <Input
+                    type={showOpenrouterKey ? 'text' : 'password'}
+                    value={openrouterApiKey}
+                    onChange={(e) => setOpenrouterApiKey(e.target.value)}
+                    placeholder="sk-or-v1-xxxxxxxx"
+                    className="text-[13px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOpenrouterKey(!showOpenrouterKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    {showOpenrouterKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  Vision (FREE) + Image Generation. Lấy key tại{' '}
+                  <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">openrouter.ai/keys</a>
+                </p>
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] text-[var(--text-secondary)] mb-1">Jina Reranker API Key</label>
+                <div className="relative">
+                  <Input
+                    type={showJinaKey ? 'text' : 'password'}
+                    value={jinaApiKey}
+                    onChange={(e) => setJinaApiKey(e.target.value)}
+                    placeholder="Jina AI API key (reranking)"
+                    className="text-[13px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowJinaKey(!showJinaKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    {showJinaKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  Tùy chọn — nếu không có, kết quả trả về theo thứ tự vector similarity
+                </p>
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] text-[var(--text-secondary)] mb-2">
+                  Perplexity Pro
+                  {perplexityConnected && <span className="ml-2 text-[10px] text-green-500">● Đã kết nối</span>}
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleLoginPerplexity}
+                    disabled={pplxLoginStatus === 'logging_in'}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all',
+                      'border border-[var(--accent-primary)] bg-[var(--accent-light)] text-[var(--accent-primary)]',
+                      'hover:bg-[var(--accent-primary)] hover:text-white cursor-pointer',
+                      pplxLoginStatus === 'logging_in' && 'opacity-60 cursor-wait'
+                    )}
+                  >
+                    {pplxLoginStatus === 'logging_in' ? (
+                      <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Đang đăng nhập...</span>
+                    ) : perplexityConnected ? 'Đăng nhập lại' : 'Đăng nhập Perplexity'}
+                  </button>
+                  {perplexityConnected && (
+                    <button
+                      onClick={handleTestPerplexity}
+                      disabled={pplxTestStatus === 'testing'}
+                      className={cn(
+                        'px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all',
+                        'border border-[var(--border-primary)]',
+                        'hover:border-[var(--accent-primary)] hover:bg-[var(--accent-light)] cursor-pointer'
+                      )}
+                    >
+                      {pplxTestStatus === 'testing' ? (
+                        <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Testing...</span>
+                      ) : 'Test'}
+                    </button>
+                  )}
+                  {pplxTestStatus === 'success' && (
+                    <span className="flex items-center gap-1 text-[11px] text-green-500">
+                      <CheckCircle size={12} /> OK
+                    </span>
+                  )}
+                  {pplxLoginStatus === 'success' && pplxTestStatus !== 'success' && (
+                    <span className="flex items-center gap-1 text-[11px] text-green-500">
+                      <CheckCircle size={12} /> Cookies đã lưu
+                    </span>
+                  )}
+                </div>
+
+                {(pplxTestStatus === 'error' || pplxLoginStatus === 'error') && (
+                  <div
+                    className="mt-1.5 px-2.5 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 text-[11px] text-[var(--status-error-text)] cursor-pointer break-words"
+                    title="Click to copy"
+                    onClick={() => navigator.clipboard.writeText(pplxTestError)}
+                  >
+                    <span className="flex items-start gap-1.5">
+                      <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                      <span>{pplxTestError}</span>
+                    </span>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-2">
+                  Dùng Pro subscription cho search & đọc URL. Bấm Đăng nhập → login trên popup → session tự lưu.
+                </p>
               </div>
             </div>
           </section>

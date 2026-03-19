@@ -425,6 +425,10 @@ declare global {
       setQdrantConfig: (url: string, apiKey: string) => Promise<boolean>
       getJinaApiKey: () => Promise<string>
       setJinaApiKey: (key: string) => Promise<boolean>
+      getVoyageApiKey: () => Promise<string>
+      setVoyageApiKey: (key: string) => Promise<boolean>
+      getOpenRouterConfig: () => Promise<{ apiKey: string; enabled: boolean; freeModels: unknown[] }>
+      setOpenRouterApiKey: (key: string) => Promise<boolean>
       getPerplexityCookies: () => Promise<string>
       setPerplexityCookies: (cookies: string) => Promise<boolean>
       loginPerplexity: () => Promise<{ success: boolean; error?: string }>
