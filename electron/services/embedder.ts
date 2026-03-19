@@ -221,6 +221,13 @@ async function embedTextsRaw(
       continue
     }
 
+    if (response.status === 403) {
+      const errBody = await response.text().catch(() => '')
+      console.error(`[Embedder] ${provider} auth failed (403): ${errBody.slice(0, 150)}`)
+      console.error(`[Embedder] Disabling ${provider} for this session — falling back to keyword search`)
+      throw new Error(`Embedding provider ${provider} auth failed (403). Check API key or balance.`)
+    }
+
     if (!response.ok) {
       const errBody = await response.text().catch(() => '')
       throw new Error(`Embedding API error ${response.status} (${provider}): ${errBody.slice(0, 200)}`)

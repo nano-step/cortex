@@ -88,6 +88,11 @@ async function decomposeQuery(query: string, projectId?: string): Promise<string
       signal: AbortSignal.timeout(10000)
     })
 
+    if (response.status === 429) {
+      console.warn('[AgenticRAG] Decomposition LLM rate limited (429), using original query')
+      return [query]
+    }
+
     if (!response.ok) {
       console.warn(`[AgenticRAG] Decomposition LLM call failed: ${response.status}`)
       return [query]
