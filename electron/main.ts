@@ -1131,12 +1131,14 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           compressionStats ? `Nén ${compressionStats.savingsPercent}% tokens` : `${context.length} chunks context`,
           Date.now() - stepStart)
 
-        // 3b. Check semantic cache before calling LLM (skip for queries with external URLs)
         const hasExternalUrl = /https?:\/\/(github\.com|.*\.atlassian\.net|.*jira.*|.*confluence.*)/i.test(query)
-        if (hasExternalUrl) invalidateCacheForQuery(query)
+        const needsToolExecution = smartIntent?.needsToolUse ||
+          /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|phân tích.*ảnh|analyze.*image)\b/i.test(query)
+        const skipCache = hasExternalUrl || needsToolExecution
+        if (skipCache) invalidateCacheForQuery(query)
         stepStart = Date.now()
         try {
-          const cached = hasExternalUrl ? null : await getCachedResponse(query)
+          const cached = skipCache ? null : await getCachedResponse(query)
           if (cached) {
             emitThinking('cache', 'done', 'Cache hit', `Tiết kiệm ${cached.tokensSaved} tokens`, Date.now() - stepStart)
             console.log(`[Chat] Semantic cache hit — saved ${cached.tokensSaved} tokens`)
