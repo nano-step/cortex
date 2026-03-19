@@ -88,7 +88,9 @@ function getAvailableModels(): ImageModel[] {
 }
 
 function getDefaultModel(): string {
+  // Priority: HuggingFace (FREE) → Proxy → OpenRouter
   if (getHuggingFaceToken()) return 'black-forest-labs/FLUX.1-schnell'
+  if (getProxyUrl() && getProxyKey()) return 'black-forest-labs/FLUX.1-schnell'
   if (isOpenRouterConfigured()) return 'google/gemini-3.1-flash-image-preview'
   return 'black-forest-labs/FLUX.1-schnell'
 }
@@ -161,16 +163,17 @@ async function generateViaHuggingFace(prompt: string, modelId: string, width: nu
   const proxyUrl = getProxyUrl()
   const proxyKey = getProxyKey()
 
-  // Route through proxy if available, otherwise direct HF
   let url: string
   let headers: Record<string, string>
 
-  if (proxyUrl && proxyKey) {
+  if (token) {
+    url = `https://api-inference.huggingface.co/models/${modelId}`
+    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  } else if (proxyUrl && proxyKey) {
     url = `${proxyUrl}/hf/models/${modelId}`
     headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${proxyKey}` }
   } else {
-    url = `https://api-inference.huggingface.co/models/${modelId}`
-    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+    throw new Error('No HuggingFace token or proxy configured')
   }
 
   const response = await fetch(url, {
@@ -342,10 +345,11 @@ export async function executeArtistTool(
         const dims = ASPECT_RATIOS[aspectRatio] || ASPECT_RATIOS['1:1']
 
         const model = IMAGE_MODELS.find(m => m.id === modelId) || IMAGE_MODELS.find(m => m.id === getDefaultModel())!
+        const provider = model.provider as string
 
         let result: { imageBase64: string | null; text: string }
 
-        if (model.provider === 'huggingface' || (model.provider === 'huggingface' && getProxyUrl())) {
+        if (provider === 'huggingface') {
           const hfResult = await generateViaHuggingFace(fullPrompt, modelId, dims.w, dims.h)
           result = { imageBase64: hfResult.imageBase64, text: hfResult.text }
         } else {
