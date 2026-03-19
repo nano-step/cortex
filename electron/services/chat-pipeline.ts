@@ -219,7 +219,7 @@ export function determinePipelinePath(
   }
 
   // Tool-only queries: skip heavy processing, go straight to LLM with tools
-  const toolOnlyPatterns = /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|edit.*image|chỉnh.*ảnh)\b/i
+  const toolOnlyPatterns = /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh)/i
   if (toolOnlyPatterns.test(query)) {
     return { path: 'standard', reason: 'Tool-only query (image gen) — skip orchestrator' }
   }

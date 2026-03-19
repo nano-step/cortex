@@ -736,11 +736,13 @@ export function ChatArea() {
               validConversation.messages[validConversation.messages.length - 1].isStreaming === true
             : false
         }
-        disabled={activeProject.brainStatus !== 'ready'}
+        disabled={false}
         placeholder={
           activeProject.brainStatus === 'ready'
             ? 'Hỏi về dự án của bạn...'
-            : 'Đang chờ Brain sẵn sàng...'
+            : activeProject.brainStatus === 'indexing'
+            ? 'Brain đang indexing... (bạn vẫn có thể chat)'
+            : 'Hỏi về dự án của bạn...'
         }
       />
     </div>

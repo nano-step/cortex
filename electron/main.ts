@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, dialog, nativeImage } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { getDb, closeDb, projectQueries, repoQueries, repoTreeQueries, conversationQueries, messageQueries } from './services/db'
+import { getDb, closeDb, projectQueries, repoQueries, repoTreeQueries, conversationQueries, messageQueries, chunkQueries } from './services/db'
 import { indexLocalRepository, searchChunks, searchChunksHybrid, getProjectStats } from './services/brain-engine'
 import { agenticRetrieve } from './services/agentic-rag'
 import { loadAndRegisterAllAgents } from './services/agents/agent-loader'
@@ -27,8 +27,8 @@ import {
   getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey,
   getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider
 } from './services/settings-service'
-import { testJiraConnection, fetchJiraProjects } from './services/jira-service'
-import { fetchSpaces } from './services/confluence-service'
+import { testJiraConnection, fetchJiraProjects, fetchProjectIssues, issueToChunkContent } from './services/jira-service'
+import { fetchSpaces, fetchPagesBySpace, pageToChunkContent } from './services/confluence-service'
 import {
   getProjectAtlassianConfig, setProjectAtlassianConfig,
   clearProjectAtlassianConfig, hasProjectAtlassianConfig
@@ -42,7 +42,7 @@ import { JiraContextSource } from './services/jira-context-source'
 import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
-import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus, VOYAGE_MODELS, getSelectedVoyageModel, setSelectedVoyageModel } from './services/embedder'
+import { embedQuery, embedProjectChunks, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus, VOYAGE_MODELS, getSelectedVoyageModel, setSelectedVoyageModel } from './services/embedder'
 import { resetQdrantClient } from './services/qdrant-store'
 import { initSkillMetricsTable, recordSkillCall, getAllSkillMetrics } from './services/skills/skill-metrics'
 
@@ -877,7 +877,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         if (forcePerplexityMode) {
           emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — dùng Perplexity search')
         }
-        const isToolOnlyQuery = /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|edit.*image|chỉnh.*ảnh|list.*image.*model)\b/i.test(query)
+        const isToolOnlyQuery = /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|list.*image.*model)/i.test(query)
         try {
           if (forcePerplexityMode || isToolOnlyQuery) throw new Error('skip')
           // Collect active branches from all repos
@@ -1134,7 +1134,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
         const hasExternalUrl = /https?:\/\/(github\.com|.*\.atlassian\.net|.*jira.*|.*confluence.*)/i.test(query)
         const needsToolExecution = smartIntent?.needsToolUse ||
-          /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|phân tích.*ảnh|analyze.*image)\b/i.test(query)
+          /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|phân tích.*ảnh|analyze.*image)/i.test(query)
         const skipCache = hasExternalUrl || needsToolExecution
         if (skipCache) invalidateCacheForQuery(query)
         stepStart = Date.now()
@@ -1937,8 +1937,49 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   })
 
   ipcMain.handle('jira:importProject', async (_event, projectId: string, jiraProjectKey: string) => {
-    // TODO: implement full Jira import pipeline (fetch issues → convert to chunks → index)
-    return { success: true, issuesImported: 0 }
+    const config = getProjectAtlassianConfig(projectId)
+    if (!config) return { success: false, error: 'Atlassian chưa được cấu hình' }
+
+    try {
+      const db = getDb()
+      const repoId = randomUUID()
+      repoQueries.create(db).run(repoId, projectId, 'jira', `${config.siteUrl}/projects/${jiraProjectKey}`, 'main')
+      repoQueries.updateStatus(db).run('indexing', null, repoId)
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải issues từ ${jiraProjectKey}...` })
+      const issues = await fetchProjectIssues(
+        { siteUrl: config.siteUrl, email: config.email, apiToken: config.apiToken },
+        jiraProjectKey,
+        (fetched, total) => mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải ${fetched}/${total} issues...` })
+      )
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang index ${issues.length} issues...` })
+      const insertChunk = chunkQueries.insert(db)
+      let chunksCreated = 0
+      db.transaction(() => {
+        for (const issue of issues) {
+          const content = issueToChunkContent(issue)
+          insertChunk.run(
+            randomUUID(), projectId, repoId,
+            `jira/${jiraProjectKey}/${issue.key}`, `${jiraProjectKey}/${issue.key}`,
+            'jira', 'jira_issue', issue.key, content, 0, 0, Math.ceil(content.length / 4),
+            '[]', '[]', JSON.stringify({ issueType: issue.issueType, status: issue.status, priority: issue.priority }), 'main'
+          )
+          chunksCreated++
+        }
+      })()
+
+      repoQueries.updateIndexed(db).run(null, Date.now(), 'ready', issues.length, chunksCreated, repoId)
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: 'Đang tạo embeddings...' })
+      try { await embedProjectChunks(projectId) } catch (e) { console.warn('[Jira] Embedding failed (non-fatal):', e) }
+
+      console.log(`[Jira] Imported ${jiraProjectKey}: ${issues.length} issues, ${chunksCreated} chunks`)
+      return { success: true, issuesImported: issues.length }
+    } catch (err) {
+      console.error('[Jira] Import failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
+    }
   })
 
   // =====================
@@ -1960,8 +2001,50 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   })
 
   ipcMain.handle('confluence:importSpace', async (_event, projectId: string, spaceId: string, spaceKey: string) => {
-    // TODO: implement full Confluence import pipeline (fetch pages → convert to chunks → index)
-    return { success: true, pagesImported: 0 }
+    const config = getProjectAtlassianConfig(projectId)
+    if (!config) return { success: false, error: 'Atlassian chưa được cấu hình' }
+
+    try {
+      const db = getDb()
+      const repoId = randomUUID()
+      repoQueries.create(db).run(repoId, projectId, 'confluence', `${config.siteUrl}/wiki/spaces/${spaceKey}`, 'main')
+      repoQueries.updateStatus(db).run('indexing', null, repoId)
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải pages từ ${spaceKey}...` })
+      const pages = await fetchPagesBySpace(
+        { siteUrl: config.siteUrl, email: config.email, apiToken: config.apiToken },
+        spaceId,
+        (fetched) => mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải ${fetched} pages...` })
+      )
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang index ${pages.length} pages...` })
+      const insertChunk = chunkQueries.insert(db)
+      let chunksCreated = 0
+      db.transaction(() => {
+        for (const page of pages) {
+          const content = pageToChunkContent(page)
+          if (content.length < 10) continue
+          insertChunk.run(
+            randomUUID(), projectId, repoId,
+            `confluence/${spaceKey}/${page.id}`, `${spaceKey}/${page.title}`,
+            'confluence', 'confluence_page', page.title, content, 0, 0, Math.ceil(content.length / 4),
+            '[]', '[]', JSON.stringify({ spaceKey, labels: page.labels }), 'main'
+          )
+          chunksCreated++
+        }
+      })()
+
+      repoQueries.updateIndexed(db).run(null, Date.now(), 'ready', pages.length, chunksCreated, repoId)
+
+      mainWindow?.webContents.send('sync:progress', { repoId, message: 'Đang tạo embeddings...' })
+      try { await embedProjectChunks(projectId) } catch (e) { console.warn('[Confluence] Embedding failed (non-fatal):', e) }
+
+      console.log(`[Confluence] Imported ${spaceKey}: ${pages.length} pages, ${chunksCreated} chunks`)
+      return { success: true, pagesImported: pages.length }
+    } catch (err) {
+      console.error('[Confluence] Import failed:', err)
+      return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
+    }
   })
 
   // =====================
