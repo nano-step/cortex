@@ -877,8 +877,9 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         if (forcePerplexityMode) {
           emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — dùng Perplexity search')
         }
+        const isToolOnlyQuery = /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|edit.*image|chỉnh.*ảnh|list.*image.*model)\b/i.test(query)
         try {
-          if (forcePerplexityMode) throw new Error('skip')
+          if (forcePerplexityMode || isToolOnlyQuery) throw new Error('skip')
           // Collect active branches from all repos
           const branchSet = new Set<string>()
           for (const repo of repos) {

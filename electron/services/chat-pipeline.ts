@@ -218,16 +218,20 @@ export function determinePipelinePath(
     return { path: 'slash_command', reason: `Slash command: ${query.match(/^\/(\w+)/)?.[1]}` }
   }
 
-  // Complex queries → agent orchestrator (the key change from OmO integration)
+  // Tool-only queries: skip heavy processing, go straight to LLM with tools
+  const toolOnlyPatterns = /\b(vẽ|draw|generate.*image|tạo.*ảnh|create.*image|edit.*image|chỉnh.*ảnh)\b/i
+  if (toolOnlyPatterns.test(query)) {
+    return { path: 'standard', reason: 'Tool-only query (image gen) — skip orchestrator' }
+  }
+
   if (intent) {
     if (intent.category === 'reasoning' && intent.confidence >= 0.7) {
       return { path: 'skill_chain', reason: `Intent: reasoning (${intent.confidence.toFixed(2)})` }
     }
-    // Multi-intent or complex analysis → orchestrate with full agent team
     if (intent.confidence >= 0.8 && (
       intent.category === 'code' ||
       intent.category === 'agent' ||
-      intent.needsToolUse && intent.needsExternalInfo
+      (intent.needsToolUse && intent.needsExternalInfo)
     )) {
       return { path: 'orchestrate', reason: `Complex intent: ${intent.category} + tools + external` }
     }
