@@ -4,193 +4,238 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-3.0.0-orange.svg)](https://github.com/hoainho/cortex/releases/tag/v3.0.0)
+[![Version](https://img.shields.io/badge/version-3.2.0-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
 
-A desktop AI assistant that deeply understands your entire codebase — with persistent memory, multi-agent orchestration, self-learning, and 30+ pluggable skills.
+A desktop AI assistant that deeply understands your entire codebase — not a ChatGPT wrapper, but a full engineering intelligence platform with persistent memory, multi-agent orchestration, and self-learning.
 
-[Download for Mac](https://github.com/hoainho/cortex/releases/download/v3.0.0/Cortex-3.0.0-arm64.dmg) · [Landing Page](https://hoainho.github.io/cortex-landing) · [Changelog](CHANGELOG.md)
+[Download for Mac](https://github.com/hoainho/cortex/releases) · [Setup Guide](docs/SETUP_GUIDE.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 ---
 
-## What is Cortex?
+## Cortex Is NOT a ChatGPT Wrapper
 
-Cortex is **not** another ChatGPT wrapper. It's a personal AI engineering platform that lives on your machine and builds a deep, persistent understanding of every project you work on.
+Most "AI coding tools" are thin wrappers: paste code → send to API → show response. Cortex is fundamentally different:
 
-- **Indexes your entire codebase** using vector embeddings, AST parsing, and code dependency graphs
-- **Remembers everything** — 3-tier memory system that learns your preferences, coding style, and past decisions
-- **Self-improves over time** — collects behavioral feedback and optimizes prompts via DSPy
-- **Multi-agent system** — 4 named agents with specialized reasoning strategies, plus 8 background agents
-- **30+ skills** — plugin architecture with MCP protocol support, browser automation, Git actions, code execution
-- **Privacy-first** — your code never leaves your machine. Only compressed context is sent to the LLM proxy
-- **Cost-conscious** — semantic caching, 10-tier model routing, and token usage tracking
+| What wrappers do | What Cortex does |
+|---|---|
+| Send your question to an LLM | **Classify intent** → route to specialized agents → orchestrate tools → verify response |
+| Give generic code suggestions | **Search YOUR codebase** for patterns → detect YOUR conventions → generate code that matches YOUR style |
+| Forget everything between sessions | **Remember** your preferences, past decisions, and coding style across sessions |
+| One model, one response | **12 agents** with different strategies, multiple models, parallel execution |
+| No context beyond pasted code | **Index your entire repo** — AST parsing, dependency graphs, vector embeddings, git history |
 
----
-
-## Why Cortex?
-
-| Capability | Cortex | Cursor | GitHub Copilot | ChatGPT |
-|---|:---:|:---:|:---:|:---:|
-| Full codebase indexing | ✅ Vector + Graph | Partial | ❌ | ❌ |
-| Persistent memory | ✅ 3-tier | ❌ | ❌ | Limited |
-| Self-learning | ✅ DSPy | ❌ | ❌ | ❌ |
-| Multi-agent system | ✅ 12 agents | ❌ | ❌ | ❌ |
-| Privacy (local-first) | ✅ | ❌ Cloud | ❌ Cloud | ❌ Cloud |
-| Semantic cache | ✅ 92% threshold | ❌ | ❌ | ❌ |
-| Plugin skills | ✅ 30+ / MCP | Limited | ❌ | Plugins |
-| Model routing | ✅ 10-tier auto | Single | Single | Single |
-| Open source | ✅ MIT | ❌ | ❌ | ❌ |
-
----
-
-## Core Architecture
+**The difference shows in practice:**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Cortex Desktop                       │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌─────────┐  │
-│  │  Chat UI  │  │  Agent    │  │  Memory   │  │  Skill  │  │
-│  │  + Slash  │  │  Panel    │  │  Dashboard│  │  Manager│  │
-│  │  Commands │  │           │  │           │  │         │  │
-│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └────┬────┘  │
-│        │              │              │             │        │
-│  ══════╧══════════════╧══════════════╧═════════════╧══════  │
-│                     IPC Bridge (preload.ts)                  │
-│  ═══════════════════════════════════════════════════════════  │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                    Hook System                        │   │
-│  │  cost-guard │ cache-check │ context-monitor │ audit   │   │
-│  └──────────────────────────┬───────────────────────────┘   │
-│                             │                               │
-│  ┌────────────┐  ┌─────────┴────────┐  ┌────────────────┐  │
-│  │   Brain    │  │   Agent System   │  │   Efficiency   │  │
-│  │   Engine   │  │                  │  │   Engine       │  │
-│  │            │  │  Sisyphus        │  │                │  │
-│  │  ChromaDB  │  │  Hephaestus     │  │  Semantic      │  │
-│  │  Tree-sit  │  │  Prometheus     │  │  Cache         │  │
-│  │  GraphRAG  │  │  Atlas          │  │  Model Router  │  │
-│  │  Hybrid    │  │                  │  │  Cost Tracker  │  │
-│  │  Search    │  │  ReAct / Plan   │  │                │  │
-│  │  Agentic   │  │  & Execute /    │  │  10-tier       │  │
-│  │  RAG       │  │  Reflexion      │  │  Ranking       │  │
-│  └────────────┘  └──────────────────┘  └────────────────┘  │
-│                                                             │
-│  ┌────────────┐  ┌──────────────────┐  ┌────────────────┐  │
-│  │  Memory    │  │  Skill Registry  │  │  Self-Learning │  │
-│  │  System    │  │                  │  │                │  │
-│  │            │  │  30+ Skills      │  │  Event         │  │
-│  │  Core      │  │  MCP Protocol    │  │  Collector     │  │
-│  │  Archival  │  │  Playwright      │  │  Feedback      │  │
-│  │  Recall    │  │  Git Actions     │  │  Detector      │  │
-│  │            │  │  Code Executor   │  │  DSPy Bridge   │  │
-│  └────────────┘  └──────────────────┘  └────────────────┘  │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              SQLite + Electron safeStorage            │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+// ChatGPT wrapper response to "How to add pagination?":
+→ Generic Express.js pagination tutorial code
+
+// Cortex response (same question):
+→ Found existing pagination in src/controllers/ProductController.ts (L45-82)
+→ Your project uses camelCase, TypeScript strict, ESLint configured
+→ Here's code matching YOUR patterns, referencing YOUR files:
+   [code that follows your project's exact conventions]
 ```
 
 ---
 
-## Features
+## The Cortex Brain — What Makes It Smart
 
-### 🧠 Brain Engine
+### Layer 1: Understanding (Brain Engine)
 
-- **Vector Search** — ChromaDB embeddings with cosine similarity for semantic code retrieval
-- **GraphRAG** — Code dependency graph with multi-hop reasoning across modules
-- **Hybrid Search** — Combines vector search + keyword fallback for maximum recall
-- **Agentic RAG** — Multi-step retrieval: decompose → iterative search → relevance boost → gap detection → confidence scoring
-- **Contextual Chunking** — Enriches code chunks with file-level context (imports, exports) before embedding
-- **RAG Fusion** — Multi-query with Reciprocal Rank Fusion for diverse results
+When you add a project, Cortex doesn't just store files — it **understands** them:
 
-### 🤖 Multi-Agent System
+```
+Your Code → AST Parser → Code Chunks (functions, classes, types)
+                ↓
+         Voyage AI Embeddings (1024-dim vectors)
+                ↓
+         SQLite FTS + Qdrant Vector DB
+                ↓
+         Agentic RAG: decompose → search → boost → verify → confidence score
+```
 
-- **Sisyphus** — Ultraworker that breaks complex tasks into atomic steps and delegates to specialists
-- **Hephaestus** — Deep Agent that researches thoroughly before acting, traces root causes
-- **Prometheus** — Strategic Planner that produces architecture proposals with execution blueprints
-- **Atlas** — Heavy Lifter for parallel execution across multiple files and systems
-- **8 background agents** — Implementation, Review, Security, Performance, Writer, Formatter, Feedback, Knowledge Crystallizer
-- **33 slash commands** — `/review`, `/security`, `/architect`, `/implement`, `/refactor`, `/playwright`, `/git-master`, and more
-- **3 reasoning strategies** — ReAct (reasoning + acting loop), Plan & Execute (two-phase), Reflexion (self-evaluating)
+- **Voyage AI embeddings** — `voyage-3-large` with 1024 dimensions, token-throttled at 80K/min
+- **Hybrid search** — Vector similarity (70%) + keyword FTS (30%) + cloud reranking
+- **Agentic RAG** — Multi-step retrieval: decompose query → iterative search → relevance boost → gap detection
+- **Qdrant** — Optional vector DB via Docker for faster search at scale
 
-### 💾 Persistent Memory
+### Layer 2: Thinking (Pipeline Engine)
 
-- **Core Memory** — Always in context: your preferences, coding style, project conventions
-- **Archival Memory** — Long-term knowledge with semantic search across all past interactions
-- **Recall Memory** — Conversation history with timeline navigation
-- **Memory Dashboard** — Visual UI to browse, edit, and manage all memory tiers
+Every query goes through an **orchestrated pipeline**, not just "send to LLM":
 
-### 🔌 Skills & MCP
+```
+User Query
+    ↓
+[Hook: before:chat] — sanitize, cost check, cache lookup
+    ↓
+[Smart Intent Classifier] — LLM-based, not keyword matching
+    ↓                        Detects: needsToolUse, needsExternalInfo, hasUrl
+[Pipeline Path Router]
+    ├── orchestrate  → Multi-agent team (complex analysis)
+    ├── skill_chain  → ReAct reasoning agent (step-by-step problems)
+    ├── slash_command → Direct skill execution (/review, /security...)
+    ├── perplexity   → Web search with real-time data
+    └── standard     → RAG + LLM with tool calling
+    ↓
+[Tool Execution] — 25+ tools, parallel via Promise.all
+    ↓
+[Hook: after:chat] — validate response, save memory, audit log
+```
 
-- **30+ built-in skills** — Code analysis, RAG search, browser automation, Git operations, code execution
-- **CortexSkill interface** — Plugin architecture with health checks, metrics, and confidence-based routing
-- **MCP Protocol** — Model Context Protocol client for external tool integration
-- **Playwright Adapter** — Browser automation skill for web scraping and testing
-- **Skill Manager UI** — Toggle skills on/off, view metrics, manage categories
+### Layer 3: Tools (25+ Built-in)
 
-### ⚡ Efficiency Engine
+Cortex doesn't just answer from knowledge — it **acts**:
 
-- **Semantic Cache** — Embedding-based response cache with 92% similarity threshold, saves tokens on repeated queries
-- **10-tier Model Routing** — Automatic model selection based on quality ranking (GitLab models at T10 highest priority)
-- **Cost Tracker** — Per-query token usage, daily cost charts, cache savings visualization
-- **Auto-rotation** — Automatically switches to next best model on auth errors (401/403)
+| Tool Category | Tools | What They Do |
+|---|---|---|
+| **Code Advisor** | `code_advisor`, `find_similar_code`, `suggest_fix`, `explain_code_pattern` | TabNine-inspired: search codebase patterns → detect conventions → style-matched suggestions |
+| **Project Analysis** | `git_contributors`, `git_log_search`, `grep_search`, `project_stats`, `search_config` | Answer questions RAG can't: team size, git history, exact config values |
+| **Vision** | `analyze_image`, `compare_images` | FREE image analysis via OpenRouter (healer-alpha, hunter-alpha) |
+| **Artist** | `generate_image`, `edit_image` | AI image generation with 8 style presets (anime, watercolor, pixel-art...) |
+| **Web** | `perplexity_search`, `perplexity_read_url` | Real-time web search and URL reading |
+| **File System** | `read_file`, `list_directory`, `search_files` | Read and navigate project files |
 
-### 🔒 Security
+### Layer 4: Memory (3-Tier Persistent)
 
-- **Prompt injection detection** — 15+ regex patterns with automatic sanitization
-- **Sandboxed code execution** — Isolated temp directories with auto-cleanup
-- **Terminal allowlist** — Only 30 pre-approved safe commands, dangerous patterns blocked
-- **Electron security** — `contextIsolation: true`, `nodeIntegration: false`, safeStorage for secrets
-- **Audit logging** — Every action tracked with full audit trail
-- **Memory isolation** — Each project uses separate collections, no cross-brain data leaks
+Cortex **remembers** across sessions:
 
-### 🔄 Self-Learning
+| Tier | What It Stores | How It's Used |
+|---|---|---|
+| **Core Memory** | Your preferences, coding style, project conventions | Always in context — shapes every response |
+| **Archival Memory** | Past decisions, resolved bugs, architecture notes | Semantic search when relevant topics arise |
+| **Recall Memory** | Conversation history with timestamps | Timeline navigation, follow-up context |
 
-- **Event Collector** — Tracks behavioral events: message sent, code accepted/rejected, follow-up patterns
-- **Feedback Detector** — Identifies implicit feedback from user behavior
-- **DSPy Bridge** — Connects to DSPy framework for automated prompt optimization
-- **Prompt Optimizer** — Continuously improves prompts based on accumulated feedback data
+### Layer 5: Agents (12 Specialized)
+
+Not one LLM call — a **team** of specialized agents:
+
+| Agent | Role | When Activated |
+|---|---|---|
+| **Sisyphus** | Ultraworker — atomic task execution | Default for implementation tasks |
+| **Hephaestus** | Deep Agent — root cause analysis with 4-phase debugging | Complex bugs, architecture issues |
+| **Prometheus** | Strategic Planner — architecture proposals | Planning, design review |
+| **Atlas** | Heavy Lifter — parallel multi-file operations | Large refactors, migrations |
+| **Oracle** | Consultant — high-quality reasoning | Architecture decisions, hard problems |
+| **Explore** | Contextual grep — codebase pattern finder | Background research |
+| **Librarian** | Reference grep — external docs/examples | Documentation lookup |
+| + 5 more | Security, Performance, Review, Writer, Formatter | Specialist analysis |
+
+### Layer 6: Self-Learning
+
+Cortex gets **smarter the more you use it**:
+
+```
+Your interactions → Event Collector → Behavioral Analysis
+    ↓
+Feedback Detector (accepts, rejects, follow-ups, copy patterns)
+    ↓
+Learned Reranker → Adjusts search result weights
+    ↓
+Over time: results align with what YOU find useful
+```
+
+---
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Cortex Desktop                              │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │                    React Frontend (Renderer)                   │    │
+│  │  Chat UI · Agent Panel · Memory Dashboard · Skill Manager     │    │
+│  │  Cost Dashboard · Settings · Drag-Drop Upload                 │    │
+│  └──────────────────────────┬───────────────────────────────────┘    │
+│                             │ IPC Bridge                              │
+│  ┌──────────────────────────┴───────────────────────────────────┐    │
+│  │                   Chat Pipeline Engine                         │    │
+│  │                                                                │    │
+│  │  ┌─────────┐  ┌────────┐  ┌───────┐  ┌──────┐  ┌─────────┐  │    │
+│  │  │Sanitize │→│ Memory │→│Intent │→│Route │→│ Execute │  │    │
+│  │  │         │  │  Load  │  │Classify│  │ Path │  │         │  │    │
+│  │  └─────────┘  └────────┘  └───────┘  └──────┘  └─────────┘  │    │
+│  │                                         │                      │    │
+│  │         ┌───────────────────────────────┼──────────┐           │    │
+│  │         │              │                │          │           │    │
+│  │    orchestrate    skill_chain      standard    perplexity     │    │
+│  │    (multi-agent)  (ReAct loop)   (RAG→LLM)   (web search)    │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│                                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐      │
+│  │  Brain   │  │  Agent   │  │ Message  │  │   Hook System  │      │
+│  │  Engine  │  │  System  │  │  Queue   │  │                │      │
+│  │          │  │          │  │          │  │  10 hooks       │      │
+│  │ Voyage   │  │ 12 agents│  │ Per-conv │  │  before:chat   │      │
+│  │ Qdrant   │  │ 3 strats │  │ FIFO     │  │  after:chat    │      │
+│  │ SQLite   │  │ parallel │  │ throttle │  │  on:error      │      │
+│  │ Hybrid   │  │ dispatch │  │          │  │  on:tool:call  │      │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────────┘      │
+│                                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐      │
+│  │ Memory   │  │  Skills  │  │Efficiency│  │   Security     │      │
+│  │ 3-tier   │  │  30+     │  │          │  │                │      │
+│  │ Core     │  │  MCP     │  │ Cache    │  │ Injection det. │      │
+│  │ Archival │  │  Vision  │  │ Cost     │  │ Sandboxed exec │      │
+│  │ Recall   │  │  Artist  │  │ Routing  │  │ Audit logging  │      │
+│  │          │  │  CodeAdv │  │ OpenRtr  │  │ safeStorage    │      │
+│  └──────────┘  └──────────┘  └──────────┘  └────────────────┘      │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐    │
+│  │  SQLite (FTS + settings) · Qdrant (vectors) · Keychain (keys) │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Configuration
+
+Cortex supports 7 configurable services. Each user gets their own encrypted data store.
+
+> **📖 Full setup guide with exact URLs for every API key: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)**
+
+| Service | Required? | Free? | Purpose |
+|---------|:---------:|:-----:|---------|
+| **LLM Proxy** | ✅ | Team key | Chat, analysis, code suggestions |
+| **Voyage AI** | ✅ Recommended | 200M tokens/month | Embedding for RAG search |
+| **Qdrant** | Optional | Docker local | Faster vector search |
+| **OpenRouter** | Optional | Vision free | Image analysis + generation |
+| **Atlassian** | Optional | API token | Jira issues + Confluence docs |
+| **GitHub** | Optional | Free PAT | PR review + code context |
+| **Perplexity** | Optional | Pro account | Web search + URL reading |
+
+Use `settings:healthCheck` to verify all services at once.
 
 ---
 
 ## Quick Start
 
-### 1. Download
+### 1. Download & Install
 
-Download the latest release for macOS (Apple Silicon):
+Download the `.dmg` from [Releases](https://github.com/hoainho/cortex/releases), drag to `/Applications`.
 
-**[⬇ Download Cortex v3.0.0](https://github.com/hoainho/cortex/releases/download/v3.0.0/Cortex-3.0.0-arm64.dmg)**
+### 2. Configure
 
-### 2. Install
+Follow the [Setup Guide](docs/SETUP_GUIDE.md) to configure your API keys.
 
-Open the `.dmg` file and drag Cortex to your `/Applications` folder.
+### 3. Create a Project
 
-### 3. First Launch
+Import from local folder or GitHub URL. Cortex indexes the entire codebase.
 
-The onboarding wizard will guide you through:
+### 4. Start Using
 
-1. **Welcome** — Overview of what Cortex can do
-2. **Proxy Setup** — Configure your LLM API proxy (default: `localhost:3456`)
-3. **Get Started** — Create your first project
-
-### 4. Import a Project
-
-- **From local folder** — Point to any directory on your machine
-- **From GitHub** — Paste a repository URL (supports private repos with PAT)
-
-### 5. Start Chatting
-
-Cortex indexes your entire codebase and is ready to answer questions, analyze architecture, review code, and more. Use `/` to see all available slash commands.
+Ask questions, use `/` slash commands, upload images, drag-drop files. Cortex understands your code.
 
 ---
 
-## Development Setup
+## Development
 
 ```bash
 git clone https://github.com/hoainho/cortex.git
@@ -199,15 +244,11 @@ npm install
 npm run dev
 ```
 
-### Available Commands
-
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Build for production |
-| `npm run dist:mac` | Build + package macOS `.dmg` |
-| `npm run test` | Run unit tests |
-| `npm run test:all` | Run all test suites |
+| `npm run dev` | Start with hot reload |
+| `npm run build` | Production build |
+| `npm run dist:mac` | Build macOS `.dmg` |
 
 ---
 
@@ -215,87 +256,22 @@ npm run dev
 
 | Layer | Technology |
 |-------|-----------|
-| Desktop Framework | Electron 33 |
-| Frontend | React 18, TypeScript 5.7, Tailwind CSS 3.4 |
-| State Management | Zustand 5 |
-| Database | better-sqlite3 (SQLite) |
-| Vector Search | ChromaDB (via HuggingFace Transformers) |
+| Desktop | Electron 33 |
+| Frontend | React 18, TypeScript 5.7, Tailwind CSS 3.4, Zustand 5 |
+| Database | SQLite (better-sqlite3) + Qdrant (Docker) |
+| Embeddings | Voyage AI `voyage-3-large` (1024 dims) |
 | Code Parsing | Tree-sitter (web-tree-sitter) |
-| Embeddings | HuggingFace `all-MiniLM-L6-v2` (local) |
-| LLM Communication | OpenAI-compatible API via proxy |
-| Tool Protocol | Model Context Protocol (MCP) SDK |
-| Markdown | react-markdown, remark-gfm, rehype-highlight, Mermaid |
-| Testing | Vitest, Testing Library, Playwright |
+| LLM | OpenAI-compatible API via proxy (multi-model routing) |
+| Tools | MCP Protocol, Playwright, Git CLI |
 | Build | electron-vite, electron-builder |
-
----
-
-## Agent System
-
-Cortex's agent system is inspired by [OpenCode's Sisyphus architecture](https://github.com/opencode-ai/opencode). Each agent has a distinct personality, specialized mode directives, and delegated capabilities.
-
-### Named Agents
-
-| Agent | Role | Mode Directives |
-|-------|------|----------------|
-| **Sisyphus** | Ultraworker — breaks tasks into atomic steps, delegates to specialists, never stops until done | `[analyze-mode]` `[search-mode]` `[todo-continuation]` |
-| **Hephaestus** | Deep Agent — researches thoroughly before acting, traces call chains and root causes | `[deep-research-mode]` `[root-cause-analysis]` |
-| **Prometheus** | Strategic Planner — produces architecture proposals with task breakdowns and risk assessments | `[planning-mode]` `[architecture-mode]` |
-| **Atlas** | Heavy Lifter — parallel execution across codebases with systematic batch operations | `[parallel-execution-mode]` `[bulk-operation-mode]` |
-
-### Reasoning Strategies
-
-| Strategy | Mechanism |
-|----------|-----------|
-| **ReAct** | Reasoning + Acting loop — think → act → observe → repeat (max 10 iterations) |
-| **Plan & Execute** | Two-phase: generate 2-6 step plan → execute each step sequentially with code context |
-| **Reflexion** | Self-evaluating: execute → self-critique → improve (max 3 reflections, early stop at score ≥ 8/10) |
-
-### Agent Selection
-
-Agents are selected via the agent popup badge in the chat input. The selected agent's system prompt and mode directives are injected into the LLM context transparently — the chat UI only shows what you type.
-
----
-
-## Roadmap
-
-- [ ] Windows and Linux builds
-- [ ] Local LLM support (Ollama, MLX, llama.cpp)
-- [ ] Self-RAG, CRAG, HyDE retrieval strategies
-- [ ] Slack and Discord MCP integration
-- [ ] LoRA personalization for coding style
-- [ ] Multi-project cross-referencing
-- [ ] Collaborative mode (team brains)
 
 ---
 
 ## License
 
-MIT License
+MIT License — Copyright (c) 2026 Hoài Nhớ
 
-```
-Copyright (c) 2026 Hoài Nhớ
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-Cortex is an independent project created and maintained by Hoài Nhớ. All intellectual property rights, including but not limited to the architecture design, agent system, and brand identity, are exclusively owned by the author.
+Cortex is an independent project. All intellectual property rights, including architecture design, agent system, and brand identity, are exclusively owned by the author.
 
 ---
 
@@ -303,6 +279,6 @@ Cortex is an independent project created and maintained by Hoài Nhớ. All inte
 
 **Built with ❤️ by [Hoài Nhớ](mailto:nhoxtvt@gmail.com)**
 
-[GitHub](https://github.com/hoainho/cortex) · [Releases](https://github.com/hoainho/cortex/releases) · [Landing Page](https://hoainho.github.io/cortex-landing)
+[GitHub](https://github.com/hoainho/cortex) · [Releases](https://github.com/hoainho/cortex/releases) · [Setup Guide](docs/SETUP_GUIDE.md)
 
 </div>

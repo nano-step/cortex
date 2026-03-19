@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — The AI Brain That Knows Your Codebase</title>
+  <meta name="description" content="Desktop AI assistant with codebase understanding, persistent memory, multi-agent orchestration, and self-learning. Not a ChatGPT wrapper.">
+  <style>
+    :root { --accent: #FF6B35; --bg: #FAF9F7; --text: #1a1a2e; --muted: #6B7280; --card: #fff; --border: #E5E7EB; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+    
+    /* Hero */
+    .hero { text-align: center; padding: 80px 0 60px; }
+    .hero h1 { font-size: 56px; font-weight: 800; letter-spacing: -2px; margin-bottom: 16px; }
+    .hero h1 span { color: var(--accent); }
+    .hero p { font-size: 20px; color: var(--muted); max-width: 640px; margin: 0 auto 32px; }
+    .hero-badge { display: inline-block; background: #FFF3ED; color: var(--accent); padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; margin-bottom: 24px; }
+    .cta { display: inline-block; background: var(--accent); color: #fff; padding: 14px 32px; border-radius: 12px; font-size: 16px; font-weight: 600; text-decoration: none; transition: .2s; }
+    .cta:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(255,107,53,.3); }
+    .cta-secondary { background: transparent; color: var(--text); border: 2px solid var(--border); margin-left: 12px; }
+    .cta-secondary:hover { border-color: var(--accent); color: var(--accent); box-shadow: none; }
+
+    /* Not a wrapper */
+    .not-wrapper { background: #1a1a2e; color: #fff; padding: 60px 0; margin: 40px 0; }
+    .not-wrapper h2 { text-align: center; font-size: 32px; margin-bottom: 32px; }
+    .not-wrapper h2 span { color: var(--accent); }
+    .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 900px; margin: 0 auto; }
+    .comp-card { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1); border-radius: 16px; padding: 24px; }
+    .comp-card.bad { border-color: rgba(255,100,100,.2); }
+    .comp-card.good { border-color: rgba(255,107,53,.3); }
+    .comp-card h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; opacity: .6; }
+    .comp-card ul { list-style: none; }
+    .comp-card ul li { padding: 6px 0; font-size: 15px; }
+    .comp-card.bad ul li::before { content: "✗ "; color: #ff6b6b; }
+    .comp-card.good ul li::before { content: "✓ "; color: var(--accent); }
+
+    /* Brain layers */
+    .layers { padding: 60px 0; }
+    .layers h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 48px; }
+    .layer { display: grid; grid-template-columns: 120px 1fr; gap: 24px; margin-bottom: 40px; align-items: start; }
+    .layer-num { width: 80px; height: 80px; background: #FFF3ED; border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 800; color: var(--accent); }
+    .layer h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+    .layer p { color: var(--muted); font-size: 15px; }
+    .layer code { background: #f3f4f6; padding: 2px 8px; border-radius: 4px; font-size: 13px; }
+
+    /* Tools grid */
+    .tools { padding: 60px 0; background: #fff; }
+    .tools h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 48px; }
+    .tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .tool-card { border: 1px solid var(--border); border-radius: 16px; padding: 24px; transition: .2s; }
+    .tool-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .tool-card h4 { font-size: 16px; margin-bottom: 8px; }
+    .tool-card p { font-size: 13px; color: var(--muted); }
+    .tool-card .tag { display: inline-block; background: #E8F5E9; color: #2E7D32; padding: 2px 8px; border-radius: 8px; font-size: 11px; font-weight: 600; }
+    .tool-card .tag.paid { background: #FFF3E0; color: #E65100; }
+
+    /* Config */
+    .config { padding: 60px 0; }
+    .config h2 { text-align: center; font-size: 36px; font-weight: 800; margin-bottom: 16px; }
+    .config > p { text-align: center; color: var(--muted); margin-bottom: 32px; }
+    .config-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; max-width: 800px; margin: 0 auto; }
+    .config-item { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+    .config-item .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .config-item .dot.req { background: var(--accent); }
+    .config-item .dot.opt { background: #E5E7EB; }
+    .config-item h4 { font-size: 14px; }
+    .config-item p { font-size: 12px; color: var(--muted); }
+
+    /* Footer */
+    footer { text-align: center; padding: 40px 0; color: var(--muted); font-size: 14px; border-top: 1px solid var(--border); }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 36px; }
+      .comparison, .tool-grid, .config-grid { grid-template-columns: 1fr; }
+      .layer { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="container">
+    <div class="hero-badge">v3.2 — Now with Vision, Image Gen, Code Advisor</div>
+    <h1>The AI Brain That<br>Knows Your <span>Codebase</span></h1>
+    <p>Desktop AI assistant with persistent memory, multi-agent orchestration, and self-learning. Not a ChatGPT wrapper — a full engineering intelligence platform.</p>
+    <a href="https://github.com/hoainho/cortex/releases" class="cta">Download for Mac</a>
+    <a href="https://github.com/hoainho/cortex" class="cta cta-secondary">View Source</a>
+  </div>
+</section>
+
+<section class="not-wrapper">
+  <div class="container">
+    <h2>Cortex Is <span>NOT</span> a ChatGPT Wrapper</h2>
+    <div class="comparison">
+      <div class="comp-card bad">
+        <h3>What Wrappers Do</h3>
+        <ul>
+          <li>Send question to one LLM</li>
+          <li>Generic code from training data</li>
+          <li>Forget everything between sessions</li>
+          <li>No codebase understanding</li>
+          <li>No tools — just text in, text out</li>
+        </ul>
+      </div>
+      <div class="comp-card good">
+        <h3>What Cortex Does</h3>
+        <ul>
+          <li>Classify intent → route to 12 agents</li>
+          <li>Search YOUR code → match YOUR style</li>
+          <li>3-tier memory across sessions</li>
+          <li>Full repo indexing + dependency graphs</li>
+          <li>25+ tools: git, vision, code advisor, web</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="layers">
+  <div class="container">
+    <h2>The 6-Layer Cortex Brain</h2>
+    
+    <div class="layer">
+      <div class="layer-num">1</div>
+      <div>
+        <h3>Understanding — Brain Engine</h3>
+        <p>AST parsing → Voyage AI embeddings (1024-dim) → SQLite FTS + Qdrant vectors → Agentic RAG with decompose/search/boost/verify pipeline. Not keyword search — <strong>semantic understanding</strong> of your code.</p>
+      </div>
+    </div>
+    
+    <div class="layer">
+      <div class="layer-num">2</div>
+      <div>
+        <h3>Thinking — Pipeline Engine</h3>
+        <p>Every query goes through: <code>Hooks → Intent Classifier → Path Router → Agent/Tool/RAG → Verify</code>. Five execution paths: orchestrate (multi-agent), skill_chain (ReAct), standard (RAG), perplexity (web), slash_command (direct).</p>
+      </div>
+    </div>
+    
+    <div class="layer">
+      <div class="layer-num">3</div>
+      <div>
+        <h3>Acting — 25+ Tools</h3>
+        <p>Code Advisor (TabNine-inspired pattern matching), Vision (FREE image analysis), Artist (image generation), Git Analysis (contributors, history), Config Search, Web Search — all called automatically by the LLM.</p>
+      </div>
+    </div>
+    
+    <div class="layer">
+      <div class="layer-num">4</div>
+      <div>
+        <h3>Remembering — 3-Tier Memory</h3>
+        <p>Core Memory (always in context: your style). Archival Memory (past decisions, semantic search). Recall Memory (conversation history). Cortex remembers what you prefer and how you code.</p>
+      </div>
+    </div>
+    
+    <div class="layer">
+      <div class="layer-num">5</div>
+      <div>
+        <h3>Collaborating — 12 Agents</h3>
+        <p>Sisyphus (ultraworker), Hephaestus (deep debugger), Prometheus (planner), Atlas (heavy lifter), Oracle (consultant), Explore, Librarian + 5 specialists. Each has its own model, strategy, and personality.</p>
+      </div>
+    </div>
+    
+    <div class="layer">
+      <div class="layer-num">6</div>
+      <div>
+        <h3>Learning — Self-Improvement</h3>
+        <p>Tracks your accepts, rejects, follow-ups, copies. Learned Reranker adjusts search weights. Feedback loop: the more you use Cortex, the better it understands what YOU find useful.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tools">
+  <div class="container">
+    <h2>25+ Built-in Tools</h2>
+    <div class="tool-grid">
+      <div class="tool-card">
+        <h4>🧠 Code Advisor</h4>
+        <p>Search codebase patterns, detect conventions, generate style-matched code. TabNine-inspired.</p>
+        <span class="tag">FREE</span>
+      </div>
+      <div class="tool-card">
+        <h4>👁️ Vision Analysis</h4>
+        <p>Upload images → AI analysis, OCR, UI review, diagram understanding. OpenRouter free models.</p>
+        <span class="tag">FREE</span>
+      </div>
+      <div class="tool-card">
+        <h4>🎨 Artist</h4>
+        <p>Generate images from text. 8 styles: anime, watercolor, pixel-art, realistic, sketch...</p>
+        <span class="tag paid">FROM $0.30/M</span>
+      </div>
+      <div class="tool-card">
+        <h4>📊 Git Analysis</h4>
+        <p>Contributors, commit history, project stats, branch activity. Answer "who did what?".</p>
+        <span class="tag">FREE</span>
+      </div>
+      <div class="tool-card">
+        <h4>🔍 Config Search</h4>
+        <p>Find env vars, settings, constants across all project files. Deep grep with context.</p>
+        <span class="tag">FREE</span>
+      </div>
+      <div class="tool-card">
+        <h4>🌐 Web Search</h4>
+        <p>Real-time web search via Perplexity Pro. Read any URL. Current events + docs.</p>
+        <span class="tag paid">PERPLEXITY PRO</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="config">
+  <div class="container">
+    <h2>Configuration</h2>
+    <p>To run Cortex at full power, configure your API keys. <a href="https://github.com/hoainho/cortex/blob/main/docs/SETUP_GUIDE.md">📖 Full Setup Guide →</a></p>
+    <div class="config-grid">
+      <div class="config-item"><div class="dot req"></div><div><h4>LLM Proxy</h4><p>Required — chat, analysis, code suggestions</p></div></div>
+      <div class="config-item"><div class="dot req"></div><div><h4>Voyage AI</h4><p>Recommended — 200M free tokens/month for RAG</p></div></div>
+      <div class="config-item"><div class="dot opt"></div><div><h4>Qdrant (Docker)</h4><p>Optional — faster vector search at scale</p></div></div>
+      <div class="config-item"><div class="dot opt"></div><div><h4>OpenRouter</h4><p>Optional — vision (free) + image generation</p></div></div>
+      <div class="config-item"><div class="dot opt"></div><div><h4>Atlassian</h4><p>Optional — Jira + Confluence integration</p></div></div>
+      <div class="config-item"><div class="dot opt"></div><div><h4>GitHub PAT</h4><p>Optional — PR review + code context</p></div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>Built with ❤️ by <a href="https://github.com/hoainho">Hoài Nhớ</a> · <a href="https://github.com/hoainho/cortex">GitHub</a> · MIT License · v3.2.0</p>
+  </div>
+</footer>
+
+</body>
+</html>
