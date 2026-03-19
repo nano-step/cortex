@@ -18,14 +18,16 @@ const JINA_API_URL = 'https://api.jina.ai/v1/embeddings'
 const JINA_MODEL = 'jina-embeddings-v3'
 
 export const VOYAGE_MODELS = [
-  { id: 'voyage-3-large', name: 'Voyage 3 Large', dims: 1024, description: 'Best quality, general purpose' },
-  { id: 'voyage-3', name: 'Voyage 3', dims: 1024, description: 'Balanced quality/speed' },
-  { id: 'voyage-3-lite', name: 'Voyage 3 Lite', dims: 512, description: 'Fastest, lower quality' },
-  { id: 'voyage-code-3', name: 'Voyage Code 3', dims: 1024, description: 'Optimized for code' },
+  { id: 'voyage-4-large', name: 'Voyage 4 Large', dims: 1024, description: 'Flagship MoE — SOTA quality, 40% cheaper than dense' },
+  { id: 'voyage-4', name: 'Voyage 4', dims: 1024, description: 'Near voyage-3-large quality, mid-size efficiency' },
+  { id: 'voyage-4-lite', name: 'Voyage 4 Lite', dims: 1024, description: 'Fast + cheap, near voyage-3.5 quality' },
+  { id: 'voyage-code-3', name: 'Voyage Code 3', dims: 1024, description: 'Optimized for code search' },
+  { id: 'voyage-3-large', name: 'Voyage 3 Large', dims: 1024, description: 'Previous gen flagship' },
+  { id: 'voyage-3.5', name: 'Voyage 3.5', dims: 1024, description: 'Previous gen balanced' },
 ] as const
 
 export function getSelectedVoyageModel(): string {
-  return getSetting('voyage_model') || 'voyage-3-large'
+  return getSetting('voyage_model') || 'voyage-4'
 }
 
 export function setSelectedVoyageModel(modelId: string): void {
