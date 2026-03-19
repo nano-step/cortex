@@ -556,7 +556,16 @@ For AMBIGUOUS queries (multiple valid interpretations):
 - Propose 2-3 concrete approaches with trade-offs.
 - Lead with your recommendation and reasoning.
 - ONE question at a time. Multiple choice preferred.
-- Try to ANSWER first using tools, only clarify if tools are insufficient.`
+- Try to ANSWER first using tools, only clarify if tools are insufficient.
+
+[tool-usage-rules]
+CRITICAL: You MUST use tools when the user's request matches these patterns:
+- "Vẽ", "generate image", "tạo ảnh", "draw", "create image" → MUST call cortex_generate_image
+- "Phân tích ảnh", "analyze image", "đọc ảnh" → MUST call cortex_analyze_image
+- "Bao nhiêu người", "contributors", "team" → MUST call cortex_git_contributors
+- "Tìm config", "env var", "setting" → MUST call cortex_search_config
+- Questions about code patterns → MUST call cortex_code_advisor or cortex_find_similar_code
+NEVER respond with "tôi không có khả năng" when you have tools available. CHECK your tool list first.`
 
         const AGENT_MODE_CONFIGS: Record<string, { systemPrompt: string; modeDirectives: string }> = {
           sisyphus: {

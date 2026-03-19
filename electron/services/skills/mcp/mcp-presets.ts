@@ -186,6 +186,21 @@ export const MCP_PRESETS: MCPPreset[] = [
     iconName: 'Radar'
   },
   {
+    id: 'google-drive',
+    name: 'Google Drive & Sheets',
+    description: 'Read files, search, and access Google Drive including Sheets, Docs, and Slides. Requires Google OAuth2 credentials.',
+    npmPackage: '@anthropic-ai/google-drive-mcp',
+    command: 'npx',
+    args: ['-y', '@anthropic-ai/google-drive-mcp'],
+    envVars: [
+      { name: 'GOOGLE_CLIENT_ID', label: 'OAuth2 Client ID', placeholder: 'xxxxx.apps.googleusercontent.com', encrypted: false, required: true },
+      { name: 'GOOGLE_CLIENT_SECRET', label: 'OAuth2 Client Secret', placeholder: 'GOCSPX-xxxxx', encrypted: true, required: true }
+    ],
+    transport: 'stdio',
+    category: 'productivity',
+    iconName: 'FileSpreadsheet'
+  },
+  {
     id: 'universal-image',
     name: 'Universal Image Gen',
     description: 'Multi-provider AI image generation — AWS Bedrock, OpenAI GPT Image, Google Gemini/Imagen 4. Generate, transform, and edit images.',

@@ -23,34 +23,40 @@ export function initSettingsTable(): void {
   `)
 }
 
+const settingsCache = new Map<string, { value: string | null; cachedAt: number }>()
+const CACHE_TTL = 30_000
+
 export function getSetting(key: string): string | null {
+  const cached = settingsCache.get(key)
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL) return cached.value
+
   const db = getDb()
   const row = db
     .prepare('SELECT value, encrypted FROM settings WHERE key = ?')
     .get(key) as { value: string; encrypted: number } | undefined
 
   if (!row) {
-    if (key.includes('api_key')) console.log(`[Settings:Read] ${key}: NOT IN DB`)
+    settingsCache.set(key, { value: null, cachedAt: Date.now() })
     return null
   }
 
-  if (key.includes('api_key')) {
-    console.log(`[Settings:Read] ${key}: found in DB (encrypted=${row.encrypted}, valueLen=${row.value.length})`)
-  }
-
+  let result: string | null = null
   if (row.encrypted) {
     if (safeStorage.isEncryptionAvailable()) {
       try {
-        return safeStorage.decryptString(Buffer.from(row.value, 'base64'))
+        result = safeStorage.decryptString(Buffer.from(row.value, 'base64'))
       } catch (err) {
         console.warn(`[Settings] Failed to decrypt '${key}':`, (err as Error).message)
-        return null
       }
+    } else {
+      console.warn(`[Settings] safeStorage not available for '${key}'`)
     }
-    console.warn(`[Settings] safeStorage not available for '${key}'`)
-    return null
+  } else {
+    result = row.value
   }
-  return row.value
+
+  settingsCache.set(key, { value: result, cachedAt: Date.now() })
+  return result
 }
 
 export function setSetting(key: string, value: string, encrypted: boolean = false): void {
@@ -69,9 +75,8 @@ export function setSetting(key: string, value: string, encrypted: boolean = fals
     'INSERT OR REPLACE INTO settings (key, value, encrypted, updated_at) VALUES (?, ?, ?, ?)'
   ).run(key, storedValue, actuallyEncrypted ? 1 : 0, Date.now())
 
-  // Verify write
-  const verify = db.prepare('SELECT key, encrypted, length(value) as len FROM settings WHERE key = ?').get(key) as { key: string; encrypted: number; len: number } | undefined
-  console.log(`[Settings:Write] ${key}: stored=${verify ? `${verify.len}chars, encrypted=${verify.encrypted}` : 'FAILED TO WRITE'}`)
+  settingsCache.delete(key)
+  console.log(`[Settings:Write] ${key}: stored (encrypted=${actuallyEncrypted})`)
 }
 
 export function getProxyUrl(): string {

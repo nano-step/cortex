@@ -339,14 +339,41 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }
     if (files.length === 0) return
 
     const paths = files.map(f => (f as File & { path?: string }).path).filter(Boolean) as string[]
+
     if (paths.length > 0 && window.electronAPI?.openFilesFromPaths) {
       try {
         const loaded = await window.electronAPI.openFilesFromPaths(paths)
         if (loaded && loaded.length > 0) {
           setAttachments(prev => [...prev, ...loaded])
+          return
         }
       } catch (err) {
-        console.error('Failed to load dropped files:', err)
+        console.error('Failed to load via paths:', err)
+      }
+    }
+
+    // Fallback: read files directly via FileReader (when File.path unavailable)
+    for (const file of files) {
+      try {
+        const buffer = await file.arrayBuffer()
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+        const base64 = btoa(binary)
+        const isImage = file.type.startsWith('image/')
+        const attachment = {
+          id: `drop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          name: file.name,
+          path: (file as File & { path?: string }).path || file.name,
+          size: file.size,
+          mimeType: file.type || 'application/octet-stream',
+          isImage,
+          base64: isImage ? base64 : undefined,
+          textContent: !isImage ? new TextDecoder().decode(new Uint8Array(buffer)) : undefined
+        }
+        setAttachments(prev => [...prev, attachment])
+      } catch (err) {
+        console.error('Failed to read dropped file:', file.name, err)
       }
     }
   }, [])
