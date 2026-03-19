@@ -425,6 +425,8 @@ declare global {
       setQdrantConfig: (url: string, apiKey: string) => Promise<boolean>
       getJinaApiKey: () => Promise<string>
       setJinaApiKey: (key: string) => Promise<boolean>
+      getHuggingFaceToken: () => Promise<string>
+      setHuggingFaceToken: (token: string) => Promise<boolean>
       getVoyageApiKey: () => Promise<string>
       setVoyageApiKey: (key: string) => Promise<boolean>
       getVoyageModels: () => Promise<Array<{ id: string; name: string; dims: number; description: string }>>

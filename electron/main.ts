@@ -69,7 +69,7 @@ import { listMCPServers, addMCPServer, removeMCPServer, connectMCPServer, discon
 import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills/builtin/filesystem-tools'
 import { getProjectToolDefinitions, executeProjectTool } from './services/skills/builtin/project-tools'
 import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
-import { getArtistToolDefinitions, executeArtistTool } from './services/skills/builtin/artist-tools'
+import { getArtistToolDefinitions, executeArtistTool, getHuggingFaceToken, setHuggingFaceToken } from './services/skills/builtin/artist-tools'
 import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
@@ -1231,7 +1231,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
             const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
             const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
-            const isArtistTool = /^cortex_(generate_image|edit_image)/.test(toolCall.function.name)
+            const isArtistTool = /^cortex_(generate_image|edit_image|list_image_models)/.test(toolCall.function.name)
             const isCodeAdvisor = /^cortex_(code_advisor|find_similar_code|suggest_fix|explain_code_pattern)/.test(toolCall.function.name)
             const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool && !isCodeAdvisor
 
@@ -1712,6 +1712,12 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     setJinaApiKey(key)
     return true
   })
+  ipcMain.handle('settings:getHuggingFaceToken', () => getHuggingFaceToken() || '')
+  ipcMain.handle('settings:setHuggingFaceToken', (_event, token: string) => {
+    setHuggingFaceToken(token)
+    return true
+  })
+
   ipcMain.handle('settings:getVoyageApiKey', () => {
     const key = getVoyageApiKey()
     console.log(`[Settings:Load] voyage_api_key: ${key ? `${key.slice(0, 6)}...` : 'NULL'}`)

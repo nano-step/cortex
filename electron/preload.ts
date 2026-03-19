@@ -156,6 +156,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setQdrantConfig: (url: string, apiKey: string) => ipcRenderer.invoke('settings:setQdrantConfig', url, apiKey),
   getJinaApiKey: () => ipcRenderer.invoke('settings:getJinaApiKey'),
   setJinaApiKey: (key: string) => ipcRenderer.invoke('settings:setJinaApiKey', key),
+  getHuggingFaceToken: () => ipcRenderer.invoke('settings:getHuggingFaceToken'),
+  setHuggingFaceToken: (token: string) => ipcRenderer.invoke('settings:setHuggingFaceToken', token),
   getVoyageApiKey: () => ipcRenderer.invoke('settings:getVoyageApiKey'),
   setVoyageApiKey: (key: string) => ipcRenderer.invoke('settings:setVoyageApiKey', key),
   getVoyageModels: () => ipcRenderer.invoke('settings:getVoyageModels'),
