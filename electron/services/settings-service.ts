@@ -229,6 +229,45 @@ export function setGitHubPAT(token: string): void {
 
 export function getWebSearchConfig(): { enabled: boolean } {
   return {
-    enabled: getSetting('websearch_enabled') !== 'false' // default enabled
+    enabled: getSetting('websearch_enabled') !== 'false'
   }
 }
+
+export interface QdrantConfig {
+  url: string
+  apiKey: string
+}
+
+export function getQdrantConfig(): QdrantConfig | null {
+  const url = getSetting('qdrant_url')
+  if (!url) return null
+  return { url, apiKey: getSetting('qdrant_api_key') || '' }
+}
+
+export function setQdrantConfig(url: string, apiKey: string): void {
+  setSetting('qdrant_url', url, false)
+  setSetting('qdrant_api_key', apiKey, true)
+}
+
+export function getJinaApiKey(): string | null {
+  return getSetting('jina_api_key')
+}
+
+export function setJinaApiKey(key: string): void {
+  setSetting('jina_api_key', key, true)
+}
+
+export function getVoyageApiKey(): string | null {
+  return getSetting('voyage_api_key')
+}
+
+export function setVoyageApiKey(key: string): void {
+  setSetting('voyage_api_key', key, true)
+}
+
+export function getEmbeddingProvider(): 'voyage' | 'jina' | 'proxy' {
+  if (getVoyageApiKey()) return 'voyage'
+  if (getJinaApiKey()) return 'jina'
+  return 'proxy'
+}
+

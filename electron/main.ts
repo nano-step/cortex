@@ -23,7 +23,8 @@ import {
   initSettingsTable, getProxyConfig, setProxyConfig, getLLMConfig, setLLMConfig,
   getGitConfig, setGitConfig, testProxyConnection, getSetting, setSetting,
   getGitHubPAT, setGitHubPAT,
-  getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey
+  getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey,
+  getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider
 } from './services/settings-service'
 import { testJiraConnection, fetchJiraProjects } from './services/jira-service'
 import { fetchSpaces } from './services/confluence-service'
@@ -40,7 +41,7 @@ import { JiraContextSource } from './services/jira-context-source'
 import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
-import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS } from './services/embedder'
+import { embedQuery, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus } from './services/embedder'
 import { resetQdrantClient } from './services/qdrant-store'
 
 // V2: Memory System
@@ -1668,12 +1669,17 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     return true
   })
   ipcMain.handle('settings:getEmbeddingConfig', () => {
+    const status = getEmbedderStatus()
     return {
       mode: 'cloud',
-      model: 'jina-embeddings-v3',
+      provider: status.provider,
+      model: status.model,
       dimensions: EMBEDDING_DIMENSIONS,
-      url: 'https://api.jina.ai',
-      hasApiKey: !!getJinaApiKey()
+      batchSize: status.batchSize,
+      tokenLimit: status.tokenLimit,
+      tokensUsed: status.tokensUsed,
+      hasVoyageKey: !!getVoyageApiKey(),
+      hasJinaKey: !!getJinaApiKey()
     }
   })
   ipcMain.handle('settings:getQdrantConfig', () => {
@@ -1691,6 +1697,9 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     setJinaApiKey(key)
     return true
   })
+  ipcMain.handle('settings:getVoyageApiKey', () => getVoyageApiKey() || '')
+  ipcMain.handle('settings:setVoyageApiKey', (_event, key: string) => { setVoyageApiKey(key); return true })
+  ipcMain.handle('settings:getEmbeddingProvider', () => getEmbeddingProvider())
   ipcMain.handle('settings:getPerplexityCookies', () => {
     return getSetting('perplexity_cookies') || ''
   })
