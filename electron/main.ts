@@ -20,9 +20,10 @@ import { logEvent, getAuditLog } from './services/audit-service'
 import { sanitizePrompt } from './services/validator'
 import { existsSync, rmSync, readFileSync, statSync } from 'fs'
 import {
-  initSettingsTable, getProxyConfig, setProxyConfig, getLLMConfig, setLLMConfig,
+  initSettingsTable, getProxyConfig, setProxyConfig, getProxyUrl, getProxyKey,
+  getLLMConfig, setLLMConfig,
   getGitConfig, setGitConfig, testProxyConnection, getSetting, setSetting,
-  getGitHubPAT, setGitHubPAT,
+  getGitHubPAT, setGitHubPAT, getAtlassianConfig,
   getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey,
   getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider
 } from './services/settings-service'
@@ -1781,6 +1782,74 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
   })
   ipcMain.handle('settings:testProxyConnection', async (_event, url: string, key: string) => {
     return testProxyConnection(url, key)
+  })
+
+  ipcMain.handle('settings:healthCheck', async () => {
+    const results: Record<string, { status: 'ok' | 'missing' | 'error'; detail?: string; latencyMs?: number }> = {}
+
+    // Proxy (required)
+    try {
+      const proxyResult = await testProxyConnection(getProxyUrl(), getProxyKey())
+      results.proxy = proxyResult.success
+        ? { status: 'ok', detail: getProxyUrl(), latencyMs: proxyResult.latencyMs }
+        : { status: 'error', detail: proxyResult.error }
+    } catch (e) { results.proxy = { status: 'error', detail: String(e) } }
+
+    // Embedding
+    const voyageKey = getVoyageApiKey()
+    const jinaKey = getJinaApiKey()
+    if (voyageKey || jinaKey) {
+      try {
+        const start = Date.now()
+        const emb = await embedQuery('health check')
+        results.embedding = { status: 'ok', detail: `${getEmbeddingProvider()} (${emb.length} dims)`, latencyMs: Date.now() - start }
+      } catch (e) { results.embedding = { status: 'error', detail: String(e) } }
+    } else {
+      results.embedding = { status: 'missing', detail: 'Set Voyage or Jina API key' }
+    }
+
+    // Qdrant
+    const qdrantCfg = getQdrantConfig()
+    if (qdrantCfg?.url) {
+      try {
+        const start = Date.now()
+        const resp = await fetch(`${qdrantCfg.url}/collections`, {
+          headers: qdrantCfg.apiKey ? { 'api-key': qdrantCfg.apiKey } : {},
+          signal: AbortSignal.timeout(5000)
+        })
+        results.qdrant = resp.ok
+          ? { status: 'ok', detail: qdrantCfg.url, latencyMs: Date.now() - start }
+          : { status: 'error', detail: `HTTP ${resp.status}` }
+      } catch (e) { results.qdrant = { status: 'error', detail: String(e) } }
+    } else {
+      results.qdrant = { status: 'missing', detail: 'Optional — set Qdrant URL in Settings' }
+    }
+
+    // OpenRouter
+    const orKey = getSetting('openrouter_api_key')
+    results.openrouter = orKey
+      ? { status: 'ok', detail: 'Key configured' }
+      : { status: 'missing', detail: 'Optional — for vision + image gen' }
+
+    // Atlassian
+    const atlCfg = getAtlassianConfig()
+    results.atlassian = atlCfg
+      ? { status: 'ok', detail: atlCfg.siteUrl }
+      : { status: 'missing', detail: 'Optional — for Jira + Confluence' }
+
+    // GitHub
+    const ghPat = getGitHubPAT()
+    results.github = ghPat
+      ? { status: 'ok', detail: 'PAT configured' }
+      : { status: 'missing', detail: 'Optional — for PR review + code context' }
+
+    // Perplexity
+    const perpCookies = getSetting('perplexity_cookies')
+    results.perplexity = perpCookies
+      ? { status: 'ok', detail: 'Cookies configured' }
+      : { status: 'missing', detail: 'Optional — for web search' }
+
+    return results
   })
   // Per-project Atlassian config
   ipcMain.handle('atlassian:getConfig', (_event, projectId: string) => {
