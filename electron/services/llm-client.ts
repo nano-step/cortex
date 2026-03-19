@@ -430,6 +430,7 @@ KHẢ NĂNG CỦA BẠN:
 - Bạn CÓ THỂ đọc Jira tickets VÀ Confluence pages — khi user gửi URL Atlassian (atlassian.net/browse/... hoặc atlassian.net/wiki/...), hệ thống TỰ ĐỘNG fetch nội dung và cung cấp cho bạn bên dưới. KHÔNG BAO GIỜ nói rằng bạn không thể truy cập URL — dữ liệu đã được fetch sẵn cho bạn.
 - Bạn CÓ THỂ đọc GitHub Issues và Pull Requests — khi user gửi URL github.com/.../issues/... hoặc github.com/.../pull/..., hệ thống TỰ ĐỘNG fetch nội dung.
 - Khi cần thiết, hệ thống CÓ THỂ tìm kiếm web để bổ sung thông tin (error messages, library docs). Kết quả web search sẽ được cung cấp bên dưới nếu có.
+- Bạn CÓ tool cortex_perplexity_search để tìm kiếm web real-time và cortex_perplexity_read_url để đọc nội dung URL bất kỳ. HÃY DÙNG khi: user hỏi về thông tin mới/real-time, khi cần đọc URL, khi RAG context không đủ, hoặc khi user yêu cầu search.
 - Nếu context không đủ cho câu hỏi cụ thể, hãy nói rõ phần nào bạn biết và phần nào cần thêm thông tin
 
 CÁCH TRẢ LỜI:
@@ -464,6 +465,7 @@ KHẢ NĂNG CỦA BẠN:
 - Bạn CÓ THỂ đọc Jira tickets VÀ Confluence pages — khi user gửi URL Atlassian (atlassian.net/browse/... hoặc atlassian.net/wiki/...), hệ thống TỰ ĐỘNG fetch nội dung và cung cấp cho bạn bên dưới. KHÔNG BAO GIỜ nói rằng bạn không thể truy cập URL — dữ liệu đã được fetch sẵn cho bạn.
 - Bạn CÓ THỂ đọc GitHub Issues và Pull Requests — khi user gửi URL github.com/.../issues/... hoặc github.com/.../pull/..., hệ thống TỰ ĐỘNG fetch nội dung.
 - Khi cần thiết, hệ thống CÓ THỂ tìm kiếm web để bổ sung thông tin (error messages, library docs). Kết quả web search sẽ được cung cấp bên dưới nếu có.
+- Bạn CÓ tool cortex_perplexity_search để tìm kiếm web real-time và cortex_perplexity_read_url để đọc nội dung URL bất kỳ. HÃY DÙNG khi: user hỏi về thông tin mới/real-time, khi cần đọc URL, khi RAG context không đủ, hoặc khi user yêu cầu search/research.
 - Nếu context không chứa đủ thông tin cho câu hỏi cụ thể, hãy nói rõ bạn biết gì và cần user hỏi cụ thể hơn về phần nào
 
 CÁCH TRẢ LỜI:
@@ -566,6 +568,16 @@ export function buildPrompt(
     systemContent += `\n\n=== MEMORY (bộ nhớ dài hạn) ===\n${memoryContext}`
   }
 
+  systemContent += `\n\n=== TOOL INSTRUCTIONS (MANDATORY) ===
+You have access to tools. When the user asks you to DO something (generate images, search code, analyze files), you MUST call the appropriate tool. NEVER say "I can't" or "I don't have the ability" if a matching tool exists in your tool list.
+Specifically:
+- Requests to draw/generate/create images → call cortex_generate_image
+- Requests to analyze/describe images → call cortex_analyze_image
+- Requests about team/contributors → call cortex_git_contributors
+- Requests to find code/config → call cortex_grep_search or cortex_search_config
+- Requests to explain code patterns → call cortex_code_advisor
+CHECK YOUR TOOL LIST before responding. If a tool can handle the request, USE IT.`
+
   if (contextSection) {
     systemContent += `\n\n=== CONTEXT TỪ SOURCE CODE ===\n${contextSection}`
   } else if (projectStats && projectStats.totalChunks > 0) {
@@ -619,7 +631,8 @@ export async function streamChatCompletion(
   window: BrowserWindow | null,
   abortSignal?: AbortSignal,
   tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
-  modelOverride?: string
+  modelOverride?: string,
+  toolChoice?: 'auto' | 'required'
 ): Promise<StreamResult> {
   let lastError: Error | null = null
   let refreshedOnce = false
@@ -628,7 +641,7 @@ export async function streamChatCompletion(
     const model = modelOverride && attempt === 0 ? modelOverride : await getCurrentModel()
 
     try {
-      const result = await _streamWithModel(model, messages, conversationId, window, abortSignal, tools)
+      const result = await _streamWithModel(model, messages, conversationId, window, abortSignal, tools, toolChoice)
       return result
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
@@ -734,7 +747,8 @@ async function _streamWithModel(
   conversationId: string,
   window: BrowserWindow | null,
   abortSignal?: AbortSignal,
-  tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>
+  tools?: Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+  toolChoice?: 'auto' | 'required'
 ): Promise<StreamResult> {
   console.log(`[LLM] Using model: ${model}`)
 
@@ -749,7 +763,7 @@ async function _streamWithModel(
 
   if (tools && tools.length > 0) {
     body.tools = tools
-    body.tool_choice = 'auto'
+    body.tool_choice = toolChoice || 'auto'
   }
 
   const response = await fetch(`${getProxyUrlSafe()}/v1/chat/completions`, {
@@ -857,6 +871,10 @@ async function _streamWithModel(
 
   if (toolCalls.length > 0) {
     finishReason = 'tool_calls'
+  }
+
+  if (!fullContent && finishReason !== 'tool_calls') {
+    console.warn(`[LLM] Model "${model}" returned empty response (finishReason: ${finishReason})`)
   }
 
   if (finishReason !== 'tool_calls') {

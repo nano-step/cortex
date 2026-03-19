@@ -144,8 +144,6 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
 ]
 
 export function getArtistToolDefinitions(): MCPToolDefinition[] {
-  const hasAny = getHuggingFaceToken() || isOpenRouterConfigured() || (getProxyUrl() && getProxyKey())
-  if (!hasAny) return []
   return TOOL_DEFINITIONS
 }
 
