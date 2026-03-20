@@ -13,8 +13,10 @@ import { scanDirectory, readFileContent, getDirectoryTree, type ScannedFile } fr
 import { chunkCode, type CodeChunk } from './code-chunker'
 import { getDb, chunkQueries, repoQueries, repoTreeQueries } from './db'
 import { randomUUID } from 'crypto'
-import { embedProjectChunks } from './embedder'
+import { embedProjectChunks, needsReEmbed, reEmbedProject } from './embedder'
 import { hybridSearch, type SearchResult } from './vector-search'
+import { isQdrantConfigured, upsertVectors, toQdrantId, resetSyncCache, recreateCollection } from './qdrant-store'
+import { EMBEDDING_DIMENSIONS as EXPECTED_DIMS } from './embedder'
 
 export interface IndexingProgress {
   phase: 'scanning' | 'parsing' | 'chunking' | 'embedding' | 'done' | 'error'
@@ -153,19 +155,60 @@ export async function indexLocalRepository(
       totalChunks
     })
 
+    resetSyncCache(projectId)
+
     try {
-      await embedProjectChunks(projectId, (processed, total) => {
-        sendProgress({
-          phase: 'embedding',
-          totalFiles: files.length,
-          processedFiles: files.length,
-          totalChunks,
-          currentFile: `Embedding ${processed}/${total} chunks...`
+      if (needsReEmbed(projectId)) {
+        console.log(`[BrainEngine] Dimension mismatch detected, re-embedding project ${projectId}`)
+        await reEmbedProject(projectId, (processed, total) => {
+          sendProgress({
+            phase: 'embedding',
+            totalFiles: files.length,
+            processedFiles: files.length,
+            totalChunks,
+            currentFile: `Re-embedding ${processed}/${total} chunks (model upgrade)...`
+          })
         })
-      })
+      } else {
+        await embedProjectChunks(projectId, (processed, total) => {
+          sendProgress({
+            phase: 'embedding',
+            totalFiles: files.length,
+            processedFiles: files.length,
+            totalChunks,
+            currentFile: `Embedding ${processed}/${total} chunks...`
+          })
+        })
+      }
     } catch (embedErr) {
       console.error('Embedding failed (non-fatal):', embedErr)
-      // Continue — brain can still do keyword search without embeddings
+    }
+
+    if (isQdrantConfigured()) {
+      try {
+        await recreateCollection(projectId)
+
+        const expectedBytes = EXPECTED_DIMS * 4
+        const embeddedChunks = db.prepare(
+          'SELECT id, embedding, branch FROM chunks WHERE project_id = ? AND embedding IS NOT NULL'
+        ).all(projectId) as Array<{ id: string; embedding: Buffer; branch: string }>
+
+        const validChunks = embeddedChunks.filter(c => c.embedding.byteLength === expectedBytes)
+        if (validChunks.length === 0) {
+          console.warn(`[BrainEngine] No ${EXPECTED_DIMS}d embeddings to upsert (${embeddedChunks.length} chunks have wrong dimensions)`)
+        } else {
+          const points = validChunks.map(c => ({
+            id: c.id,
+            vector: Array.from(new Float32Array(c.embedding.buffer, c.embedding.byteOffset, c.embedding.byteLength / 4)),
+            payload: { branch: c.branch || 'main' }
+          }))
+
+          await upsertVectors(projectId, points)
+          console.log(`[BrainEngine] Upserted ${points.length} vectors to Qdrant`)
+        }
+      } catch (qdrantErr) {
+        console.error('Qdrant upsert failed (non-fatal):', qdrantErr)
+      }
     }
 
     // Mark repo as ready
@@ -202,9 +245,6 @@ export async function indexLocalRepository(
   }
 }
 
-/**
- * Search chunks using hybrid search (vector + keyword)
- */
 export async function searchChunksHybrid(
   projectId: string,
   query: string,
@@ -261,32 +301,30 @@ export function getProjectStats(projectId: string) {
 
   const repos = repoQueries.getByProject(db).all(projectId) as any[]
 
-  // Collect active branches for branch-aware stats
-  const activeBranches = repos.map((r: any) => r.active_branch || 'main')
-  const branchPlaceholders = activeBranches.length > 0 ? activeBranches.map(() => '?').join(',') : "'main'"
-  const branchParams = activeBranches.length > 0 ? activeBranches : ['main']
+  const uniqueBranches = [...new Set(repos.map((r: any) => r.active_branch || 'main').filter(Boolean))]
+  if (uniqueBranches.length === 0) uniqueBranches.push('main')
+  const branchPlaceholders = uniqueBranches.map(() => '?').join(',')
+  const params = [projectId, ...uniqueBranches]
 
-  // Count chunks only for active branches
   const chunkCount = (db.prepare(
     `SELECT COUNT(*) as count FROM chunks WHERE project_id = ? AND branch IN (${branchPlaceholders})`
-  ).get(projectId, ...branchParams) as any)?.count || 0
+  ).get(...params) as any)?.count || 0
 
-  // Count distinct files only for active branches
   const fileCount = (db.prepare(
     `SELECT COUNT(DISTINCT relative_path) as count FROM chunks WHERE project_id = ? AND branch IN (${branchPlaceholders})`
-  ).get(projectId, ...branchParams) as any)?.count || 0
+  ).get(...params) as any)?.count || 0
 
   const languages = db
     .prepare(
       `SELECT language, COUNT(*) as count FROM chunks WHERE project_id = ? AND branch IN (${branchPlaceholders}) GROUP BY language ORDER BY count DESC`
     )
-    .all(projectId, ...branchParams)
+    .all(...params)
 
   const chunkTypes = db
     .prepare(
       `SELECT chunk_type, COUNT(*) as count FROM chunks WHERE project_id = ? AND branch IN (${branchPlaceholders}) GROUP BY chunk_type ORDER BY count DESC`
     )
-    .all(projectId, ...branchParams)
+    .all(...params)
 
   const tree = db
     .prepare('SELECT tree_text FROM project_directory_trees WHERE project_id = ?')
