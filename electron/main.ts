@@ -1221,6 +1221,23 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         const abortController = new AbortController()
         activeAbortControllers.set(conversationId, abortController)
 
+        let effectiveModel = routedModel || undefined
+        if (isToolOnlyQuery && effectiveModel) {
+          const noToolModels = ['codex', 'o1-mini', 'o1-preview']
+          const isNoTool = noToolModels.some(m => effectiveModel!.toLowerCase().includes(m))
+          if (isNoTool) {
+            const models = getAvailableModels()
+            const toolCapable = models.find(m =>
+              !noToolModels.some(nt => m.id.toLowerCase().includes(nt)) &&
+              m.status === 'ready'
+            )
+            if (toolCapable) {
+              console.log(`[Chat] Model ${effectiveModel} does not support tools, switching to ${toolCapable.id}`)
+              effectiveModel = toolCapable.id
+            }
+          }
+        }
+
         const MAX_TOOL_ITERATIONS = 10
         let toolIteration = 0
         let streamResult = await streamChatCompletion(
@@ -1229,7 +1246,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           mainWindow,
           abortController.signal,
           allTools.length > 0 ? allTools : undefined,
-          routedModel || undefined,
+          effectiveModel,
           forcePerplexityMode ? 'required' : undefined
         )
 
