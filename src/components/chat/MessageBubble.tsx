@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import mermaid from 'mermaid'
-import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText } from 'lucide-react'
+import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText, Download, Maximize2, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { Message } from '../../types'
 import { TypingIndicator } from './TypingIndicator'
@@ -209,9 +209,111 @@ function extractTextContent(children: ReactNode): string {
   return ''
 }
 
-// =====================
-// Custom markdown components
-// =====================
+function GeneratedImagePreview({ src, alt }: { src: string; alt?: string }) {
+  const [fullscreen, setFullscreen] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const handleDownload = () => {
+    const link = document.createElement('a')
+    link.href = src
+    link.download = `cortex-image-${Date.now()}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const handleCopy = async () => {
+    try {
+      const response = await fetch(src)
+      const blob = await response.blob()
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      const textArea = document.createElement('textarea')
+      textArea.value = src
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <>
+      <div className="my-3 relative group/img inline-block max-w-full">
+        <img
+          src={src}
+          alt={alt || 'Generated Image'}
+          className="rounded-2xl border border-[var(--border-primary)] max-w-full max-h-[512px] object-contain cursor-pointer hover:brightness-95 transition-all shadow-sm"
+          onClick={() => setFullscreen(true)}
+        />
+        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover/img:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); setFullscreen(true) }}
+            className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors backdrop-blur-sm"
+            title="Xem toàn màn hình"
+          >
+            <Maximize2 size={14} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleCopy() }}
+            className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors backdrop-blur-sm"
+            title="Copy ảnh"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDownload() }}
+            className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors backdrop-blur-sm"
+            title="Tải xuống"
+          >
+            <Download size={14} />
+          </button>
+        </div>
+      </div>
+
+      {fullscreen && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-8 cursor-pointer backdrop-blur-md"
+          onClick={() => setFullscreen(false)}
+        >
+          <button
+            onClick={() => setFullscreen(false)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            <X size={20} />
+          </button>
+          <div className="absolute bottom-6 flex gap-3">
+            <button
+              onClick={(e) => { e.stopPropagation(); handleCopy() }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px]"
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? 'Đã copy' : 'Copy ảnh'}
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleDownload() }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px]"
+            >
+              <Download size={14} />
+              Tải xuống
+            </button>
+          </div>
+          <img
+            src={src}
+            alt={alt || 'Generated Image'}
+            className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
+  )
+}
+
 const markdownComponents = {
   code({ className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '')
@@ -322,6 +424,19 @@ const markdownComponents = {
   blockquote({ children }: { children: ReactNode }) {
     return (
       <blockquote className="border-l-3 border-[var(--accent-primary)] pl-4 my-3 text-[var(--text-secondary)] italic">{children}</blockquote>
+    )
+  },
+  img({ src, alt }: { src?: string; alt?: string }) {
+    if (src?.startsWith('data:image/')) {
+      return <GeneratedImagePreview src={src} alt={alt} />
+    }
+    return (
+      <img
+        src={src}
+        alt={alt || ''}
+        className="rounded-xl max-w-full my-2 border border-[var(--border-primary)]"
+        loading="lazy"
+      />
     )
   },
   hr() {
