@@ -70,6 +70,7 @@ import { getBuiltinToolDefinitions, executeBuiltinTool } from './services/skills
 import { getProjectToolDefinitions, executeProjectTool } from './services/skills/builtin/project-tools'
 import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
 import { getArtistToolDefinitions, executeArtistTool, getHuggingFaceToken, setHuggingFaceToken } from './services/skills/builtin/artist-tools'
+import { orchestrateImageGen } from './services/skills/builtin/image-orchestrator'
 import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
@@ -973,10 +974,33 @@ Return ONLY the enhanced prompt, nothing else.`
             }
           }
 
-          emitThinking('tool_call', 'running', 'Generating image', `FLUX.1 Schnell — "${imagePrompt.slice(0, 50)}..."`)
+          const orchResult = await orchestrateImageGen(query, imagePrompt)
+          console.log(`[Chat] Image orchestrator: ${orchResult.category} → ${orchResult.model}`)
+
+          if (orchResult.useMermaid && orchResult.mermaidCode) {
+            emitThinking('tool_call', 'done', 'Diagram generated', `Mermaid.js (${orchResult.category})`)
+            const diagramResponse = `\`\`\`mermaid\n${orchResult.mermaidCode}\n\`\`\``
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: diagramResponse, done: true })
+            persistAssistantResponse(conversationId, diagramResponse)
+            recordSkillCall('mermaid_diagram', true, 0)
+
+            await stageAfterHooks({
+              projectId, conversationId, query, response: diagramResponse,
+              model: 'mermaid', metadata: { path: 'direct_diagram', category: orchResult.category }
+            }, emitThinking)
+
+            return { success: true, content: diagramResponse, contextChunks: [] }
+          }
+
+          const finalModel = orchResult.model !== 'mermaid' ? orchResult.model : undefined
+          const finalPrompt = orchResult.enhancedPrompt + orchResult.promptSuffix
+          emitThinking('tool_call', 'running', 'Generating image',
+            `${orchResult.category} → ${orchResult.model.split('/').pop()} — "${finalPrompt.slice(0, 40)}..."`)
 
           try {
-            const toolResult = await executeArtistTool('cortex_generate_image', JSON.stringify({ prompt: imagePrompt }))
+            const toolArgs: Record<string, string> = { prompt: finalPrompt }
+            if (finalModel) toolArgs.model = finalModel
+            const toolResult = await executeArtistTool('cortex_generate_image', JSON.stringify(toolArgs))
             recordSkillCall('cortex_generate_image', !toolResult.isError, 0)
 
             if (!toolResult.isError) {
