@@ -987,10 +987,8 @@ Return ONLY the enhanced prompt, nothing else.`
                 const imgPath = imagePathMatch[1].trim()
                 try {
                   const imgBuf = readFileSync(imgPath)
-                  const imgB64 = imgBuf.toString('base64')
                   const sizeKB = Math.round(imgBuf.length / 1024)
-                  finalResponse = `![Generated Image](cortex-image://${imgPath})\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
-                  mainWindow?.webContents.send('chat:generatedImage', { conversationId, path: imgPath, base64: imgB64, sizeKB })
+                  finalResponse = `[CORTEX_IMG:${imgPath}]\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
                 } catch {
                   finalResponse = toolResult.content.replace(/CORTEX_IMAGE_PATH:.+/, '')
                 }
@@ -1482,7 +1480,7 @@ Return ONLY the enhanced prompt, nothing else.`
             const imgBuf = readFileSync(imgPath)
             const imgB64 = imgBuf.toString('base64')
             const sizeKB = Math.round(imgBuf.length / 1024)
-            const imageBlock = `![Generated Image](cortex-image://${imgPath})\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
+            const imageBlock = `[CORTEX_IMG:${imgPath}]\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
             mainWindow?.webContents.send('chat:generatedImage', { conversationId, path: imgPath, base64: imgB64, sizeKB })
             response = response ? `${imageBlock}\n\n${response}` : imageBlock
             mainWindow?.webContents.send('chat:stream', { conversationId, content: response, done: true })

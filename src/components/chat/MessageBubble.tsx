@@ -326,37 +326,42 @@ function GeneratedImagePreview({ src, alt }: { src: string; alt?: string }) {
 
       {fullscreen && (
         <div
-          className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-8 cursor-pointer backdrop-blur-md"
+          className="fixed inset-0 z-[9999] flex items-center justify-center cursor-pointer"
           onClick={() => setFullscreen(false)}
         >
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" />
           <button
             onClick={() => setFullscreen(false)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+            className="absolute top-6 right-6 z-10 p-2.5 rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors border border-white/10"
           >
             <X size={20} />
           </button>
-          <div className="absolute bottom-6 flex gap-3">
+          <div className="relative z-10 p-8">
+            <div className="relative rounded-2xl overflow-hidden shadow-[0_25px_60px_rgba(0,0,0,0.5)] border border-white/10">
+              <img
+                src={src}
+                alt={alt || 'Generated Image'}
+                className="max-w-[85vw] max-h-[80vh] object-contain"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          </div>
+          <div className="absolute bottom-8 z-10 flex gap-3">
             <button
               onClick={(e) => { e.stopPropagation(); handleCopy() }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px]"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px] border border-white/10 backdrop-blur-sm"
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
               {copied ? 'Đã copy' : 'Copy ảnh'}
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); handleDownload() }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px]"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors text-[13px] border border-white/10 backdrop-blur-sm"
             >
               <Download size={14} />
               Tải xuống
             </button>
           </div>
-          <img
-            src={src}
-            alt={alt || 'Generated Image'}
-            className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
         </div>
       )}
     </>
@@ -567,9 +572,10 @@ function StreamingContent({ conversationId }: { conversationId: string }) {
           let display = content
             .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
             .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
+            .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
             .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
             .trim()
-          streamRef.current.textContent = display || (content.includes('tool_call') ? '🎨 Generating image...' : '')
+          streamRef.current.textContent = display || (content.includes('tool_call') || content.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
         }
       })
     })
@@ -596,6 +602,21 @@ function cortexUrlTransform(url: string): string {
   if (/^(https?|ircs?|mailto|xmpp)$/i.test(protocol)) return url
   if (url.indexOf('/') !== -1 && colon > url.indexOf('/')) return url
   return ''
+}
+
+function ContentWithImages({ content }: { content: string }) {
+  const imgMatch = content.match(/\[CORTEX_IMG:([^\]]+)\]/)
+  if (!imgMatch) return <MemoizedMarkdown content={content} />
+
+  const imgPath = imgMatch[1]
+  const textWithoutImg = content.replace(/\[CORTEX_IMG:[^\]]+\]\n*/g, '').trim()
+
+  return (
+    <>
+      <CortexImageLoader path={imgPath} alt="Generated Image" />
+      {textWithoutImg && <MemoizedMarkdown content={textWithoutImg} />}
+    </>
+  )
 }
 
 const MemoizedMarkdown = ({ content }: { content: string }) => {
@@ -711,7 +732,7 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
             <StreamingContent conversationId={message.conversationId} />
           ) : showMarkdown ? (
             <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] prose-cortex break-words stream-fade-in">
-              <MemoizedMarkdown content={message.content} />
+              <ContentWithImages content={message.content} />
             </div>
           ) : (
             <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] break-words whitespace-pre-wrap">
