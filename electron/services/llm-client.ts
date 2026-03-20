@@ -869,28 +869,63 @@ async function _streamWithModel(
     function: { name: tc.name, arguments: tc.arguments }
   }))
 
-  // Fallback: parse tool calls from text content (some proxies embed tool_call in text)
+  // Fallback: parse tool calls from text when proxy doesn't use structured tool_calls
   if (toolCalls.length === 0 && fullContent) {
-    const textToolCallRegex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g
-    let match: RegExpExecArray | null
-    while ((match = textToolCallRegex.exec(fullContent)) !== null) {
-      try {
-        const parsed = JSON.parse(match[1]) as { name?: string; arguments?: Record<string, unknown> }
-        if (parsed.name) {
-          toolCalls.push({
-            id: `tc_text_${Date.now()}_${toolCalls.length}`,
-            type: 'function',
-            function: {
-              name: parsed.name,
-              arguments: JSON.stringify(parsed.arguments || {})
-            }
-          })
-          console.log(`[LLM] Parsed tool call from text: ${parsed.name}`)
-        }
-      } catch { /* malformed JSON in tool_call tag */ }
+    const toolNames = tools?.map(t => t.function.name) || []
+
+    function tryAddToolCall(name: string, args: Record<string, unknown>): boolean {
+      if (!toolNames.includes(name)) return false
+      toolCalls.push({
+        id: `tc_text_${Date.now()}_${toolCalls.length}`,
+        type: 'function',
+        function: { name, arguments: JSON.stringify(args) }
+      })
+      console.log(`[LLM] Parsed tool call from text: ${name}`)
+      return true
     }
+
+    // Format 1: <tool_call>{"name":"...", "arguments":{...}}</tool_call>
+    const xmlMatches = fullContent.matchAll(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g)
+    for (const m of xmlMatches) {
+      try {
+        const p = JSON.parse(m[1]) as Record<string, unknown>
+        if (p.name) tryAddToolCall(String(p.name), (p.arguments || {}) as Record<string, unknown>)
+      } catch { /* skip */ }
+    }
+
+    // Format 2: {"type":"cortex_xxx", "data":{...}} or {"name":"cortex_xxx", "arguments":{...}}
+    if (toolCalls.length === 0) {
+      const jsonBlocks = fullContent.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g) || []
+      for (const block of jsonBlocks) {
+        const jsonStr = block.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '')
+        try {
+          const p = JSON.parse(jsonStr) as Record<string, unknown>
+          const name = String(p.type || p.name || p.tool || '')
+          const args = (p.data || p.arguments || p.params || p.input || {}) as Record<string, unknown>
+          if (name && tryAddToolCall(name, args)) break
+        } catch { /* skip */ }
+      }
+    }
+
+    // Format 3: plain {"name":"cortex_xxx"} without code fence
+    if (toolCalls.length === 0) {
+      const plainJsonMatch = fullContent.match(/\{\s*"(?:type|name|tool)"\s*:\s*"(cortex_\w+)"[\s\S]*?\}/)
+      if (plainJsonMatch) {
+        try {
+          const p = JSON.parse(plainJsonMatch[0]) as Record<string, unknown>
+          const name = String(p.type || p.name || p.tool || '')
+          const args = (p.data || p.arguments || p.params || p.input || {}) as Record<string, unknown>
+          tryAddToolCall(name, args)
+        } catch { /* skip */ }
+      }
+    }
+
     if (toolCalls.length > 0) {
-      fullContent = fullContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim()
+      fullContent = fullContent
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+        .replace(/```(?:json)?\s*\{[\s\S]*?"cortex_[\s\S]*?\}\s*```/g, '')
+        .replace(/\{\s*"(?:type|name|tool)"\s*:\s*"cortex_\w+"[\s\S]*?\}/g, '')
+        .trim()
     }
   }
 
