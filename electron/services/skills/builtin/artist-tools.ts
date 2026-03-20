@@ -317,6 +317,7 @@ export async function executeArtistTool(
   }
 
   try {
+    console.log(`[Artist] Executing ${toolName} with args:`, JSON.stringify(args).slice(0, 200))
     switch (toolName) {
       case 'cortex_generate_image': {
         const prompt = String(args.prompt || '')
@@ -416,6 +417,9 @@ export async function executeArtistTool(
         return { content: `Unknown artist tool: ${toolName}`, isError: true }
     }
   } catch (err) {
-    return { content: `Image generation failed: ${(err as Error).message}`, isError: true }
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error(`[Artist] Tool ${toolName} failed:`, errMsg)
+    if (err instanceof Error && err.stack) console.error(err.stack)
+    return { content: `Image generation failed: ${errMsg}`, isError: true }
   }
 }
