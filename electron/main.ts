@@ -1299,9 +1299,26 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           const toolResults = await Promise.all(streamResult.toolCalls.map(executeOneTool))
 
           for (const { toolCall, toolResult } of toolResults) {
+            let contentForLLM = toolResult.content
+            const imagePathMatch = toolResult.content.match(/CORTEX_IMAGE_PATH:(.+)/)
+            if (imagePathMatch) {
+              const imgPath = imagePathMatch[1].trim()
+              try {
+                const imgBuffer = readFileSync(imgPath)
+                const imgBase64 = imgBuffer.toString('base64')
+                const imgMarkdown = `![Generated Image](data:image/png;base64,${imgBase64})`
+                mainWindow?.webContents.send('chat:generatedImage', {
+                  conversationId, path: imgPath, base64: imgBase64
+                })
+                contentForLLM = contentForLLM.replace(/CORTEX_IMAGE_PATH:.+/, `[Image saved at ${imgPath}]`)
+                console.log(`[Chat] Image generated: ${imgPath} (${Math.round(imgBuffer.length / 1024)}KB)`)
+              } catch (imgErr) {
+                console.warn('[Chat] Failed to read generated image:', imgErr)
+              }
+            }
             messages.push({
               role: 'tool',
-              content: toolResult.content,
+              content: contentForLLM,
               tool_call_id: toolCall.id
             })
           }

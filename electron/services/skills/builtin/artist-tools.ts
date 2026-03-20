@@ -7,7 +7,8 @@
  */
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
-import { dirname } from 'path'
+import { dirname, join } from 'path'
+import { tmpdir } from 'os'
 import { InferenceClient } from '@huggingface/inference'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getProxyUrl, getProxyKey, getSetting, setSetting } from '../../settings-service'
@@ -166,11 +167,10 @@ async function generateViaHuggingFace(prompt: string, modelId: string, width: nu
   console.log(`[Artist] Calling HuggingFace: ${modelId} (${width}x${height})`)
 
   const result = await client.textToImage({
+    provider: 'hf-inference',
     model: modelId,
     inputs: prompt,
     parameters: {
-      width,
-      height,
       num_inference_steps: modelId.includes('schnell') ? 4 : 20
     }
   })
@@ -349,18 +349,19 @@ export async function executeArtistTool(
         if (result.text) parts.push(result.text)
 
         if (result.imageBase64) {
-          if (savePath) {
-            const saved = saveImage(result.imageBase64, savePath)
-            parts.push(`Image saved to: ${saved}`)
-          }
           const sizeKB = Math.round(result.imageBase64.length * 0.75 / 1024)
-          parts.push(`![Generated Image](data:image/png;base64,${result.imageBase64})`)
-          parts.push(`*${model.name} | ${aspectRatio} (${dims.w}x${dims.h}) | ${style} | ${sizeKB}KB*`)
+
+          const finalPath = savePath || join(tmpdir(), `cortex-img-${Date.now()}.png`)
+          saveImage(result.imageBase64, finalPath)
+
+          parts.push(`Image generated successfully and saved to: ${finalPath}`)
+          parts.push(`Model: ${model.name} | Size: ${sizeKB}KB | Resolution: ${dims.w}x${dims.h} | Style: ${style}`)
+          parts.push(`CORTEX_IMAGE_PATH:${finalPath}`)
         } else {
           parts.push('Model returned text but no image. Try a different model or adjust the prompt.')
         }
 
-        return { content: parts.join('\n\n'), isError: false }
+        return { content: parts.join('\n'), isError: false }
       }
 
       case 'cortex_edit_image': {
