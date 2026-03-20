@@ -878,6 +878,10 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — dùng Perplexity search')
         }
         const isToolOnlyQuery = /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|list.*image.*model)/i.test(query)
+        if (isToolOnlyQuery) {
+          console.log('[Chat] Tool-only query detected — skipping RAG entirely')
+          emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — chỉ cần gọi tool')
+        }
         try {
           if (forcePerplexityMode || isToolOnlyQuery) throw new Error('skip')
           // Collect active branches from all repos
@@ -916,8 +920,13 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           console.log(`[Chat] Agentic RAG: ${context.length} chunks across ${activeBranches.length} branches, confidence ${bestConfidence.toFixed(2)}, ${totalIterations} iterations`)
           emitThinking('rag', 'done', 'Tìm kiếm trong Brain', `${context.length} chunks, ${totalIterations} vòng, confidence ${bestConfidence.toFixed(2)}`, Date.now() - stepStart)
         } catch (ragErr) {
-          console.warn('[Chat] Agentic RAG failed, falling back to hybrid search:', ragErr)
-          // Fallback to original per-branch hybrid search
+          const wasIntentionalSkip = ragErr instanceof Error && ragErr.message === 'skip'
+          if (wasIntentionalSkip) {
+            console.log('[Chat] RAG skipped intentionally')
+          } else {
+            console.warn('[Chat] Agentic RAG failed, falling back to hybrid search:', ragErr)
+          }
+          if (!wasIntentionalSkip) {
           const branchSet = new Set<string>()
           for (const repo of repos) {
             branchSet.add(repo.active_branch || 'main')
@@ -942,6 +951,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           }
           context = context.slice(0, fallbackBaseChunks)
           emitThinking('rag', 'done', 'Tìm kiếm trong Brain', `${context.length} chunks (fallback)`, Date.now() - stepStart)
+          } // end if (!wasIntentionalSkip)
         }
 
         // 1b. Auto-fetch external context (Jira, Confluence, GitHub, etc.)
@@ -1940,12 +1950,21 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     const config = getProjectAtlassianConfig(projectId)
     if (!config) return { success: false, error: 'Atlassian chưa được cấu hình' }
 
-    try {
-      const db = getDb()
-      const repoId = randomUUID()
-      repoQueries.create(db).run(repoId, projectId, 'jira', `${config.siteUrl}/projects/${jiraProjectKey}`, 'main')
-      repoQueries.updateStatus(db).run('indexing', null, repoId)
+    const db = getDb()
+    const sourcePath = `${config.siteUrl}/projects/${jiraProjectKey}`
+    const existing = db.prepare('SELECT id FROM repositories WHERE project_id = ? AND source_type = ? AND source_path = ?').get(projectId, 'jira', sourcePath) as { id: string } | undefined
+    if (existing) {
+      chunkQueries.deleteByRepo(db).run(existing.id)
+      repoQueries.updateStatus(db).run('indexing', null, existing.id)
+    }
 
+    const repoId = existing?.id || randomUUID()
+    if (!existing) {
+      repoQueries.create(db).run(repoId, projectId, 'jira', sourcePath, 'main')
+      repoQueries.updateStatus(db).run('indexing', null, repoId)
+    }
+
+    try {
       mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải issues từ ${jiraProjectKey}...` })
       const issues = await fetchProjectIssues(
         { siteUrl: config.siteUrl, email: config.email, apiToken: config.apiToken },
@@ -1978,6 +1997,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
       return { success: true, issuesImported: issues.length }
     } catch (err) {
       console.error('[Jira] Import failed:', err)
+      repoQueries.updateStatus(db).run('error', err instanceof Error ? err.message : 'Import thất bại', repoId)
       return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
     }
   })
@@ -2004,12 +2024,21 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
     const config = getProjectAtlassianConfig(projectId)
     if (!config) return { success: false, error: 'Atlassian chưa được cấu hình' }
 
-    try {
-      const db = getDb()
-      const repoId = randomUUID()
-      repoQueries.create(db).run(repoId, projectId, 'confluence', `${config.siteUrl}/wiki/spaces/${spaceKey}`, 'main')
-      repoQueries.updateStatus(db).run('indexing', null, repoId)
+    const db = getDb()
+    const sourcePath = `${config.siteUrl}/wiki/spaces/${spaceKey}`
+    const existing = db.prepare('SELECT id FROM repositories WHERE project_id = ? AND source_type = ? AND source_path = ?').get(projectId, 'confluence', sourcePath) as { id: string } | undefined
+    if (existing) {
+      chunkQueries.deleteByRepo(db).run(existing.id)
+      repoQueries.updateStatus(db).run('indexing', null, existing.id)
+    }
 
+    const repoId = existing?.id || randomUUID()
+    if (!existing) {
+      repoQueries.create(db).run(repoId, projectId, 'confluence', sourcePath, 'main')
+      repoQueries.updateStatus(db).run('indexing', null, repoId)
+    }
+
+    try {
       mainWindow?.webContents.send('sync:progress', { repoId, message: `Đang tải pages từ ${spaceKey}...` })
       const pages = await fetchPagesBySpace(
         { siteUrl: config.siteUrl, email: config.email, apiToken: config.apiToken },
@@ -2043,6 +2072,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
       return { success: true, pagesImported: pages.length }
     } catch (err) {
       console.error('[Confluence] Import failed:', err)
+      repoQueries.updateStatus(db).run('error', err instanceof Error ? err.message : 'Import thất bại', repoId)
       return { success: false, error: err instanceof Error ? err.message : 'Import thất bại' }
     }
   })
