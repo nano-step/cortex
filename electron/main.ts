@@ -990,8 +990,8 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         try {
           const webTrigger = detectWebSearchTrigger(query)
           const intentNeedsExternal = smartIntent?.needsExternalInfo === true
-          const ragInsufficient = context.length === 0 && query.length > 20
-          const shouldWebSearch = webTrigger.triggered || ragInsufficient || intentNeedsExternal
+          const ragInsufficient = context.length === 0 && query.length > 20 && !isToolOnlyQuery
+          const shouldWebSearch = !isToolOnlyQuery && (webTrigger.triggered || ragInsufficient || intentNeedsExternal)
           if (shouldWebSearch) {
             emitThinking('web_search', 'running', 'Tìm kiếm web',
               intentNeedsExternal ? 'Intent cần thông tin bên ngoài' : undefined)
@@ -1186,6 +1186,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           console.warn('[Chat] Cache check failed (non-fatal):', cacheErr)
         }
 
+        console.log(`[Chat] Preparing tools + LLM call (context: ${context.length} chunks, isToolOnly: ${isToolOnlyQuery})`)
         const builtinTools = getBuiltinToolDefinitions(projectId)
         const projectTools = getProjectToolDefinitions(projectId)
         const visionTools = getVisionToolDefinitions()
