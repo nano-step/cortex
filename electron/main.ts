@@ -1426,6 +1426,14 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
+        console.error(`[Chat] PIPELINE ERROR: ${errorMsg}`)
+        if (err instanceof Error && err.stack) console.error(err.stack)
+
+        mainWindow?.webContents.send('chat:stream', {
+          conversationId,
+          content: `⚠️ Lỗi: ${errorMsg}`,
+          done: true
+        })
 
         try {
           await runHooks('on:error', {
