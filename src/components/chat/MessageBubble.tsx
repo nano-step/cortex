@@ -222,8 +222,9 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
       return
     }
 
-    const handler = (_event: unknown, data: { path: string; base64: string }) => {
-      if (data.path === path) {
+    const handler = (...args: unknown[]) => {
+      const data = args[1] as { path: string; base64: string } | undefined
+      if (data?.path === path && data.base64) {
         imageCache.set(path, data.base64)
         setBase64(data.base64)
         setLoading(false)
@@ -244,8 +245,9 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
 
   if (loading) {
     return (
-      <div className="my-3 w-64 h-64 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] flex items-center justify-center">
-        <div className="animate-pulse text-[var(--text-tertiary)] text-[13px]">Loading image...</div>
+      <div className="my-3 w-80 h-48 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] flex flex-col items-center justify-center gap-3">
+        <div className="w-8 h-8 border-2 border-[var(--accent-primary)] border-t-transparent rounded-full animate-spin" />
+        <span className="text-[13px] text-[var(--text-tertiary)]">Generating image...</span>
       </div>
     )
   }
@@ -566,7 +568,14 @@ function StreamingContent({ conversationId }: { conversationId: string }) {
 
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       rafRef.current = requestAnimationFrame(() => {
-        if (streamRef.current) streamRef.current.textContent = content
+        if (streamRef.current) {
+          let display = content
+            .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+            .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
+            .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
+            .trim()
+          streamRef.current.textContent = display || (content.includes('tool_call') ? '🎨 Generating image...' : '')
+        }
       })
     })
     return () => {
