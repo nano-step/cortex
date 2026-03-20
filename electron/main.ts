@@ -261,6 +261,13 @@ app.whenReady().then(() => {
     }).filter(Boolean)
   })
 
+  ipcMain.handle('fs:readFileAsBase64', (_event, filePath: string) => {
+    try {
+      if (!existsSync(filePath)) return ''
+      return readFileSync(filePath).toString('base64')
+    } catch { return '' }
+  })
+
   ipcMain.handle('dialog:openFilesFromPaths', (_event, filePaths: string[]) => {
     const MAX_FILE_SIZE = 10 * 1024 * 1024
     const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
@@ -1306,10 +1313,10 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
               const imgPath = imagePathMatch[1].trim()
               try {
                 const imgBuffer = readFileSync(imgPath)
-                const imgBase64 = imgBuffer.toString('base64')
-                generatedImageMarkdown = `![Generated Image](data:image/png;base64,${imgBase64})\n\n*Saved: ${imgPath} (${Math.round(imgBuffer.length / 1024)}KB)*`
-                contentForLLM = contentForLLM.replace(/CORTEX_IMAGE_PATH:.+/, `[Image generated and saved at ${imgPath}]`)
-                console.log(`[Chat] Image generated: ${imgPath} (${Math.round(imgBuffer.length / 1024)}KB)`)
+                const sizeKB = Math.round(imgBuffer.length / 1024)
+                generatedImageMarkdown = `CORTEX_GENERATED_IMAGE:${imgPath}`
+                contentForLLM = contentForLLM.replace(/CORTEX_IMAGE_PATH:.+/, `[Image generated and saved at ${imgPath}, ${sizeKB}KB]`)
+                console.log(`[Chat] Image generated: ${imgPath} (${sizeKB}KB)`)
               } catch (imgErr) {
                 console.warn('[Chat] Failed to read generated image:', imgErr)
               }
@@ -1337,9 +1344,21 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         let response = streamResult.content
 
         if (!response && generatedImageMarkdown) {
-          console.log('[Chat] LLM returned empty after image gen — using image as response')
-          response = generatedImageMarkdown
-          mainWindow?.webContents.send('chat:stream', { conversationId, content: response, done: true })
+          const imgPath = generatedImageMarkdown.replace('CORTEX_GENERATED_IMAGE:', '')
+          console.log(`[Chat] LLM returned empty after image gen — streaming image from ${imgPath}`)
+          try {
+            const imgBuf = readFileSync(imgPath)
+            const imgB64 = imgBuf.toString('base64')
+            const sizeKB = Math.round(imgBuf.length / 1024)
+            response = `![Generated Image](cortex-image://${imgPath})\n\n*Saved: ${imgPath} (${sizeKB}KB)*`
+            mainWindow?.webContents.send('chat:generatedImage', {
+              conversationId, path: imgPath, base64: imgB64, sizeKB
+            })
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: response, done: true })
+          } catch {
+            response = `Image generated at: ${imgPath}`
+            mainWindow?.webContents.send('chat:stream', { conversationId, content: response, done: true })
+          }
         } else if (!response && !forcePerplexityMode) {
           console.warn(`[Chat] Empty response from ${routedModel}, retrying without tools...`)
           emitThinking('streaming', 'running', 'Đang trả lời', 'Retry không có tools')

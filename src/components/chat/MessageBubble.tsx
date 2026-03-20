@@ -209,6 +209,58 @@ function extractTextContent(children: ReactNode): string {
   return ''
 }
 
+const imageCache = new Map<string, string>()
+
+function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
+  const [base64, setBase64] = useState<string | null>(imageCache.get(path) || null)
+  const [loading, setLoading] = useState(!imageCache.has(path))
+
+  useEffect(() => {
+    if (imageCache.has(path)) {
+      setBase64(imageCache.get(path)!)
+      setLoading(false)
+      return
+    }
+
+    const handler = (_event: unknown, data: { path: string; base64: string }) => {
+      if (data.path === path) {
+        imageCache.set(path, data.base64)
+        setBase64(data.base64)
+        setLoading(false)
+      }
+    }
+    window.electronAPI?.onGeneratedImage?.(handler)
+
+    window.electronAPI?.readFileAsBase64?.(path).then((b64: string) => {
+      if (b64) {
+        imageCache.set(path, b64)
+        setBase64(b64)
+        setLoading(false)
+      }
+    }).catch(() => setLoading(false))
+
+    return () => { window.electronAPI?.offGeneratedImage?.(handler) }
+  }, [path])
+
+  if (loading) {
+    return (
+      <div className="my-3 w-64 h-64 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] flex items-center justify-center">
+        <div className="animate-pulse text-[var(--text-tertiary)] text-[13px]">Loading image...</div>
+      </div>
+    )
+  }
+
+  if (!base64) {
+    return (
+      <div className="my-3 p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-[13px] text-[var(--text-tertiary)]">
+        Image saved at: {path}
+      </div>
+    )
+  }
+
+  return <GeneratedImagePreview src={`data:image/png;base64,${base64}`} alt={alt} />
+}
+
 function GeneratedImagePreview({ src, alt }: { src: string; alt?: string }) {
   const [fullscreen, setFullscreen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -429,6 +481,9 @@ const markdownComponents = {
   img({ src, alt }: { src?: string; alt?: string }) {
     if (src?.startsWith('data:image/')) {
       return <GeneratedImagePreview src={src} alt={alt} />
+    }
+    if (src?.startsWith('cortex-image://')) {
+      return <CortexImageLoader path={src.replace('cortex-image://', '')} alt={alt} />
     }
     return (
       <img

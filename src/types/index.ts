@@ -425,6 +425,9 @@ declare global {
       setQdrantConfig: (url: string, apiKey: string) => Promise<boolean>
       getJinaApiKey: () => Promise<string>
       setJinaApiKey: (key: string) => Promise<boolean>
+      readFileAsBase64: (path: string) => Promise<string>
+      onGeneratedImage: (cb: (...args: unknown[]) => void) => void
+      offGeneratedImage: (cb: (...args: unknown[]) => void) => void
       getHuggingFaceToken: () => Promise<string>
       setHuggingFaceToken: (token: string) => Promise<boolean>
       getVoyageApiKey: () => Promise<string>

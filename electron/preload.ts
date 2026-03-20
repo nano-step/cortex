@@ -110,6 +110,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Branch management
   listBranches: (repoId: string) =>
     ipcRenderer.invoke('branch:list', repoId),
+  readFileAsBase64: (path: string) => ipcRenderer.invoke('fs:readFileAsBase64', path),
+  onGeneratedImage: (cb: (...args: any[]) => void) => { ipcRenderer.on('chat:generatedImage', cb) },
+  offGeneratedImage: (cb: (...args: any[]) => void) => { ipcRenderer.removeListener('chat:generatedImage', cb) },
   switchBranch: (projectId: string, repoId: string, branch: string) =>
     ipcRenderer.invoke('branch:switch', projectId, repoId, branch),
   getCurrentBranch: (repoId: string) =>
