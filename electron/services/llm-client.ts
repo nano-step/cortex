@@ -869,6 +869,31 @@ async function _streamWithModel(
     function: { name: tc.name, arguments: tc.arguments }
   }))
 
+  // Fallback: parse tool calls from text content (some proxies embed tool_call in text)
+  if (toolCalls.length === 0 && fullContent) {
+    const textToolCallRegex = /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/g
+    let match: RegExpExecArray | null
+    while ((match = textToolCallRegex.exec(fullContent)) !== null) {
+      try {
+        const parsed = JSON.parse(match[1]) as { name?: string; arguments?: Record<string, unknown> }
+        if (parsed.name) {
+          toolCalls.push({
+            id: `tc_text_${Date.now()}_${toolCalls.length}`,
+            type: 'function',
+            function: {
+              name: parsed.name,
+              arguments: JSON.stringify(parsed.arguments || {})
+            }
+          })
+          console.log(`[LLM] Parsed tool call from text: ${parsed.name}`)
+        }
+      } catch { /* malformed JSON in tool_call tag */ }
+    }
+    if (toolCalls.length > 0) {
+      fullContent = fullContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim()
+    }
+  }
+
   if (toolCalls.length > 0) {
     finishReason = 'tool_calls'
   }
