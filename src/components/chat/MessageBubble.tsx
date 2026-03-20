@@ -216,6 +216,8 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
   const [loading, setLoading] = useState(!imageCache.has(path))
 
   useEffect(() => {
+    console.log('[ImageLoader] Loading:', path, 'cached:', imageCache.has(path))
+
     if (imageCache.has(path)) {
       setBase64(imageCache.get(path)!)
       setLoading(false)
@@ -225,6 +227,7 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
     const handler = (...args: unknown[]) => {
       const data = args[1] as { path: string; base64: string } | undefined
       if (data?.path === path && data.base64) {
+        console.log('[ImageLoader] Received via event:', path, data.base64.length, 'chars')
         imageCache.set(path, data.base64)
         setBase64(data.base64)
         setLoading(false)
@@ -232,13 +235,25 @@ function CortexImageLoader({ path, alt }: { path: string; alt?: string }) {
     }
     window.electronAPI?.onGeneratedImage?.(handler)
 
-    window.electronAPI?.readFileAsBase64?.(path).then((b64: string) => {
-      if (b64) {
-        imageCache.set(path, b64)
-        setBase64(b64)
+    if (window.electronAPI?.readFileAsBase64) {
+      console.log('[ImageLoader] Calling readFileAsBase64...')
+      window.electronAPI.readFileAsBase64(path).then((b64: string) => {
+        console.log('[ImageLoader] readFileAsBase64 result:', b64 ? `${b64.length} chars` : 'EMPTY')
+        if (b64) {
+          imageCache.set(path, b64)
+          setBase64(b64)
+          setLoading(false)
+        } else {
+          setLoading(false)
+        }
+      }).catch((err: unknown) => {
+        console.error('[ImageLoader] readFileAsBase64 failed:', err)
         setLoading(false)
-      }
-    }).catch(() => setLoading(false))
+      })
+    } else {
+      console.error('[ImageLoader] readFileAsBase64 NOT available on electronAPI')
+      setLoading(false)
+    }
 
     return () => { window.electronAPI?.offGeneratedImage?.(handler) }
   }, [path])
