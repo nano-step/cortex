@@ -607,6 +607,17 @@ function StreamingContent({ conversationId }: { conversationId: string }) {
   )
 }
 
+function cortexUrlTransform(url: string): string {
+  if (url.startsWith('cortex-image://')) return url
+  if (url.startsWith('data:image/')) return url
+  const colon = url.indexOf(':')
+  if (colon === -1) return url
+  const protocol = url.slice(0, colon)
+  if (/^(https?|ircs?|mailto|xmpp)$/i.test(protocol)) return url
+  if (url.indexOf('/') !== -1 && colon > url.indexOf('/')) return url
+  return ''
+}
+
 const MemoizedMarkdown = ({ content }: { content: string }) => {
   const rendered = useMemo(() => {
     const normalized = normalizeMarkdownLists(content)
@@ -614,6 +625,7 @@ const MemoizedMarkdown = ({ content }: { content: string }) => {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
+        urlTransform={cortexUrlTransform}
         components={markdownComponents}
       >
         {normalized}
