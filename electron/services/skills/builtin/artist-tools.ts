@@ -8,6 +8,7 @@
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { dirname } from 'path'
+import { InferenceClient } from '@huggingface/inference'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getProxyUrl, getProxyKey, getSetting, setSetting } from '../../settings-service'
 import {
@@ -158,45 +159,34 @@ function buildPrompt(prompt: string, style?: string, negativePrompt?: string): s
 // Provider-specific image generation
 async function generateViaHuggingFace(prompt: string, modelId: string, width: number, height: number): Promise<{ imageBase64: string; text: string }> {
   const token = getHuggingFaceToken()
-  const proxyUrl = getProxyUrl()
-  const proxyKey = getProxyKey()
+  if (!token) throw new Error('No HuggingFace token configured. Set it in Settings.')
 
-  let url: string
-  let headers: Record<string, string>
+  const client = new InferenceClient(token)
 
-  if (token) {
-    url = `https://api-inference.huggingface.co/models/${modelId}`
-    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-  } else if (proxyUrl && proxyKey) {
-    url = `${proxyUrl}/hf/models/${modelId}`
-    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${proxyKey}` }
-  } else {
-    throw new Error('No HuggingFace token or proxy configured')
-  }
+  console.log(`[Artist] Calling HuggingFace: ${modelId} (${width}x${height})`)
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      inputs: prompt,
-      parameters: { width, height }
-    }),
-    signal: AbortSignal.timeout(120000)
+  const result = await client.textToImage({
+    model: modelId,
+    inputs: prompt,
+    parameters: {
+      width,
+      height,
+      num_inference_steps: modelId.includes('schnell') ? 4 : 20
+    }
   })
 
-  if (!response.ok) {
-    const err = await response.text().catch(() => '')
-    throw new Error(`HuggingFace error (${response.status}): ${err.slice(0, 200)}`)
+  let buffer: Buffer
+  const resultAny = result as unknown
+  if (typeof resultAny === 'object' && resultAny !== null && typeof (resultAny as Blob).arrayBuffer === 'function') {
+    buffer = Buffer.from(await (resultAny as Blob).arrayBuffer())
+  } else if (typeof resultAny === 'string') {
+    buffer = Buffer.from(resultAny, 'base64')
+  } else {
+    buffer = Buffer.from(resultAny as ArrayBuffer)
   }
 
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
-    const buffer = Buffer.from(await response.arrayBuffer())
-    return { imageBase64: buffer.toString('base64'), text: '' }
-  }
-
-  const data = await response.json() as { error?: string }
-  throw new Error(data.error || 'HuggingFace returned unexpected response')
+  console.log(`[Artist] HuggingFace returned ${buffer.length} bytes`)
+  return { imageBase64: buffer.toString('base64'), text: '' }
 }
 
 async function generateViaOpenRouter(
