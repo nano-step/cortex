@@ -219,7 +219,7 @@ export function determinePipelinePath(
   }
 
   // Tool-only queries: skip heavy processing, go straight to LLM with tools
-  const toolOnlyPatterns = /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh)/i
+  const toolOnlyPatterns = /(vẽ|hãy vẽ|giúp.*vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|thiết kế.*hình|làm.*hình|tạo.*hình)/i
   if (toolOnlyPatterns.test(query)) {
     return { path: 'standard', reason: 'Tool-only query (image gen) — skip orchestrator' }
   }

@@ -884,7 +884,7 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         if (forcePerplexityMode) {
           emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — dùng Perplexity search')
         }
-        const hasImageKeyword = /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|list.*image.*model)/i.test(query)
+        const hasImageKeyword = /(vẽ|hãy vẽ|giúp.*vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|list.*image.*model|thiết kế.*hình|làm.*hình|tạo.*hình)/i.test(query)
         const styleKeywords = /(anime|realistic|cinematic|illustration|painting|digital art|pixel art|watercolor|sketch|cyberpunk|3d render|oil painting|studio ghibli|comic|concept art|fantasy art|chibi|manga)/i
         const sceneKeywords = /(soaring|running|flying|sitting|standing|walking|floating|glowing|burning)/i
         const isImagePrompt = !hasImageKeyword && styleKeywords.test(query) && (sceneKeywords.test(query) || query.split(/\s+/).length >= 8)
@@ -892,12 +892,88 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         if (isToolOnlyQuery) {
           console.log('[Chat] Tool-only query — calling image gen directly, bypassing LLM')
           emitThinking('rag', 'skipped', 'Tìm kiếm trong Brain', 'Bỏ qua — generate ảnh')
-          emitThinking('tool_call', 'running', 'Generating image', 'FLUX.1 Schnell via HuggingFace')
 
-          const imagePrompt = query
-            .replace(/^(vẽ|draw|generate|tạo|create|hãy vẽ|giúp tôi vẽ|help me draw)\s*/i, '')
-            .replace(/^(an? |1 |one |một |images? with:?\s*)/i, '')
+          let rawPrompt = query
+            .replace(/^(vẽ|hãy vẽ|giúp tôi vẽ|draw|help me draw|generate|tạo|create)\s*/i, '')
+            .replace(/^(cho tôi |giúp tôi |cho em |an? |1 |one |một |images? with:?\s*)/i, '')
+            .replace(/\s*[-–—]\s*(phong cách|style)\s*/i, ', ')
             .trim() || query
+
+          const hasVietnamese = /[àáạảãăắằặẳẵâấầậẩẫđèéẹẻẽêếềệểễìíịỉĩòóọỏõôốồộổỗơớờợởỡùúụủũưứừựửữỳýỵỷỹ]/i.test(rawPrompt)
+
+          let imagePrompt = rawPrompt
+          if (hasVietnamese) {
+            emitThinking('tool_call', 'running', 'Dịch + enhance prompt', 'Vietnamese → English')
+            try {
+              const translateResponse = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getProxyKey()}` },
+                body: JSON.stringify({
+                  model: 'gemini-2.5-flash-lite',
+                  messages: [{
+                    role: 'user',
+                    content: `You are an expert image prompt engineer. Translate this Vietnamese image description to English, then enhance it into a detailed, high-quality image generation prompt. Add specific details about lighting, composition, colors, atmosphere, and art style. Keep the original intent.
+
+Input: ${rawPrompt}
+
+Return ONLY the enhanced English prompt, nothing else.`
+                  }],
+                  max_tokens: 300,
+                  temperature: 0.7,
+                  stream: false
+                }),
+                signal: AbortSignal.timeout(15000)
+              })
+              if (translateResponse.ok) {
+                const data = await translateResponse.json() as { choices?: Array<{ message?: { content?: string } }> }
+                const enhanced = data.choices?.[0]?.message?.content?.trim()
+                if (enhanced && enhanced.length > 10) {
+                  console.log(`[Chat] Prompt enhanced: "${rawPrompt.slice(0, 50)}" → "${enhanced.slice(0, 80)}"`)
+                  imagePrompt = enhanced
+                }
+              }
+              emitThinking('tool_call', 'done', 'Dịch + enhance prompt', `${imagePrompt.slice(0, 60)}...`)
+            } catch (translateErr) {
+              console.warn('[Chat] Prompt translation failed, using original:', translateErr)
+              emitThinking('tool_call', 'done', 'Dịch + enhance prompt', 'Fallback — dùng prompt gốc')
+            }
+          } else {
+            emitThinking('tool_call', 'running', 'Enhance prompt', 'Optimizing for image gen')
+            try {
+              const enhanceResponse = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getProxyKey()}` },
+                body: JSON.stringify({
+                  model: 'gemini-2.5-flash-lite',
+                  messages: [{
+                    role: 'user',
+                    content: `You are an expert image prompt engineer. Enhance this image description into a detailed, high-quality prompt for AI image generation. Add specific details about lighting, composition, colors, atmosphere, camera angle, and art quality. Keep the original intent and style.
+
+Input: ${rawPrompt}
+
+Return ONLY the enhanced prompt, nothing else.`
+                  }],
+                  max_tokens: 300,
+                  temperature: 0.7,
+                  stream: false
+                }),
+                signal: AbortSignal.timeout(15000)
+              })
+              if (enhanceResponse.ok) {
+                const data = await enhanceResponse.json() as { choices?: Array<{ message?: { content?: string } }> }
+                const enhanced = data.choices?.[0]?.message?.content?.trim()
+                if (enhanced && enhanced.length > 10) {
+                  console.log(`[Chat] Prompt enhanced: "${rawPrompt.slice(0, 50)}" → "${enhanced.slice(0, 80)}"`)
+                  imagePrompt = enhanced
+                }
+              }
+              emitThinking('tool_call', 'done', 'Enhance prompt', `${imagePrompt.slice(0, 60)}...`)
+            } catch {
+              emitThinking('tool_call', 'done', 'Enhance prompt', 'Fallback — dùng prompt gốc')
+            }
+          }
+
+          emitThinking('tool_call', 'running', 'Generating image', `FLUX.1 Schnell — "${imagePrompt.slice(0, 50)}..."`)
 
           try {
             const toolResult = await executeArtistTool('cortex_generate_image', JSON.stringify({ prompt: imagePrompt }))
