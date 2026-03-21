@@ -15,12 +15,28 @@ export interface MCPServerInfo {
   lastChecked: number
 }
 
+export interface MCPPresetInfo {
+  id: string
+  name: string
+  description: string
+  category: string
+  iconName: string
+  envVars: Array<{ name: string; label: string; placeholder: string; encrypted: boolean; required: boolean }>
+  installed: boolean
+  configured: boolean
+  connected: boolean
+}
+
 interface MCPState {
   servers: MCPServerInfo[]
+  presets: MCPPresetInfo[]
   loading: boolean
   connecting: string | null
+  installingPreset: string | null
 
   loadServers: () => Promise<void>
+  loadPresets: () => Promise<void>
+  installPreset: (presetId: string, envValues: Record<string, string>) => Promise<boolean>
   addServer: (config: {
     name: string
     transportType: 'stdio' | 'sse'
@@ -37,8 +53,36 @@ interface MCPState {
 
 export const useMCPStore = create<MCPState>((set, get) => ({
   servers: [],
+  presets: [],
   loading: false,
   connecting: null,
+  installingPreset: null,
+
+  loadPresets: async () => {
+    if (!window.electronAPI?.mcpGetPresets) return
+    try {
+      const presets = await window.electronAPI.mcpGetPresets()
+      set({ presets: presets || [] })
+    } catch (err) {
+      console.error('Failed to load MCP presets:', err)
+    }
+  },
+
+  installPreset: async (presetId, envValues) => {
+    if (!window.electronAPI?.mcpInstallPreset) return false
+    set({ installingPreset: presetId })
+    try {
+      await window.electronAPI.mcpInstallPreset(presetId, envValues)
+      await get().loadPresets()
+      await get().loadServers()
+      return true
+    } catch (err) {
+      console.error('Failed to install MCP preset:', err)
+      return false
+    } finally {
+      set({ installingPreset: null })
+    }
+  },
 
   loadServers: async () => {
     if (!window.electronAPI?.mcpList) return

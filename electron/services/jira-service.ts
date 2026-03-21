@@ -344,15 +344,37 @@ export async function fetchSingleIssue(
  * Returns array of { siteUrl, issueKey } for each matched URL.
  */
 export function extractJiraReferences(text: string): Array<{ siteUrl: string; issueKey: string }> {
-  const regex = /https?:\/\/([\w.-]+\.atlassian\.net)\/browse\/([A-Z][A-Z0-9]+-\d+)/gi
   const results: Array<{ siteUrl: string; issueKey: string }> = []
+  const seen = new Set<string>()
+
+  const browseRegex = /https?:\/\/([\w.-]+\.atlassian\.net)\/browse\/([A-Z][A-Z0-9]+-\d+)/gi
   let match: RegExpExecArray | null
-  while ((match = regex.exec(text)) !== null) {
-    results.push({
-      siteUrl: `https://${match[1]}`,
-      issueKey: match[2]
-    })
+  while ((match = browseRegex.exec(text)) !== null) {
+    const key = match[2].toUpperCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      results.push({ siteUrl: `https://${match[1]}`, issueKey: key })
+    }
   }
+
+  const selectedIssueRegex = /https?:\/\/([\w.-]+\.atlassian\.net)\/.*[?&]selectedIssue=([A-Z][A-Z0-9]+-\d+)/gi
+  while ((match = selectedIssueRegex.exec(text)) !== null) {
+    const key = match[2].toUpperCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      results.push({ siteUrl: `https://${match[1]}`, issueKey: key })
+    }
+  }
+
+  const boardIssueRegex = /https?:\/\/([\w.-]+\.atlassian\.net)\/.*?\/([A-Z][A-Z0-9]+-\d+)(?:\?|$|#|\s)/gi
+  while ((match = boardIssueRegex.exec(text)) !== null) {
+    const key = match[2].toUpperCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      results.push({ siteUrl: `https://${match[1]}`, issueKey: key })
+    }
+  }
+
   return results
 }
 

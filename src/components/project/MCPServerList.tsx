@@ -15,16 +15,42 @@ interface MCPServerListProps {
 
 interface MCPPreset {
   name: string
-  command: string
-  args: string
+  transport: 'stdio' | 'sse'
+  command?: string
+  args?: string
+  serverUrl?: string
   envHint?: string
+  envHints?: Array<{ key: string; label: string; secret?: boolean; required?: boolean }>
+  category?: 'research' | 'dev' | 'utility'
+  description?: string
 }
 
 const MCP_PRESETS: MCPPreset[] = [
-  { name: 'GitHub', command: 'npx', args: '-y @modelcontextprotocol/server-github', envHint: 'GITHUB_PERSONAL_ACCESS_TOKEN' },
-  { name: 'Filesystem', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem .' },
-  { name: 'Sequential Thinking', command: 'npx', args: '-y @modelcontextprotocol/server-sequential-thinking' },
-  { name: 'Memory', command: 'npx', args: '-y @modelcontextprotocol/server-memory' },
+  // — Research & Deep Search —
+  { name: 'Tavily Search', transport: 'stdio', command: 'npx', args: '-y tavily-mcp', category: 'research', description: 'AI-optimized search + full content',
+    envHints: [{ key: 'TAVILY_API_KEY', label: 'Tavily API Key', secret: true, required: true }] },
+  { name: 'Firecrawl', transport: 'stdio', command: 'npx', args: '-y firecrawl-mcp', category: 'research', description: 'Web scraping, JS-rendered pages',
+    envHints: [{ key: 'FIRECRAWL_API_KEY', label: 'Firecrawl API Key', secret: true, required: true }] },
+  { name: 'Exa Search', transport: 'stdio', command: 'npx', args: '-y exa-mcp-server', category: 'research', description: 'Semantic search + content crawling',
+    envHints: [{ key: 'EXA_API_KEY', label: 'Exa API Key', secret: true, required: true }] },
+  { name: 'Jina AI Reader', transport: 'sse', serverUrl: 'https://mcp.jina.ai/v1', category: 'research', description: 'Read URLs, web/arXiv search, screenshots — 19 tools',
+    envHints: [{ key: 'JINA_API_KEY', label: 'Jina API Key (optional, free tier)', secret: true, required: false }] },
+  // — Development —
+  { name: 'GitHub', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-github', category: 'dev', envHint: 'GITHUB_PERSONAL_ACCESS_TOKEN' },
+  { name: 'Slack', transport: 'stdio', command: 'npx', args: '-y slack-mcp-server', category: 'dev', envHints: [
+    { key: 'SLACK_MCP_XOXC_TOKEN', label: 'Slack xoxc- token', secret: true },
+    { key: 'SLACK_MCP_XOXD_TOKEN', label: 'Slack xoxd- token (cookie d)', secret: true },
+  ] },
+  // — Utility —
+  { name: 'Filesystem', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-filesystem .', category: 'utility' },
+  { name: 'Sequential Thinking', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-sequential-thinking', category: 'utility' },
+  { name: 'Memory', transport: 'stdio', command: 'npx', args: '-y @modelcontextprotocol/server-memory', category: 'utility' },
+]
+
+const PRESET_CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: 'research', label: 'Research & Deep Search' },
+  { key: 'dev', label: 'Development' },
+  { key: 'utility', label: 'Utility' },
 ]
 
 export function MCPServerList({ expanded, onToggle }: MCPServerListProps) {
@@ -38,6 +64,8 @@ export function MCPServerList({ expanded, onToggle }: MCPServerListProps) {
   const [formEnv, setFormEnv] = useState('')
   const [adding, setAdding] = useState(false)
   const [showPresets, setShowPresets] = useState(false)
+  const [pendingPreset, setPendingPreset] = useState<MCPPreset | null>(null)
+  const [presetEnvValues, setPresetEnvValues] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (expanded) loadServers()
@@ -76,29 +104,33 @@ export function MCPServerList({ expanded, onToggle }: MCPServerListProps) {
     }
   }
 
-  const handlePreset = async (preset: MCPPreset) => {
+  const handlePresetClick = (preset: MCPPreset) => {
     const existingNames = servers.map(s => s.name.toLowerCase())
-    if (existingNames.includes(preset.name.toLowerCase())) {
-      setShowPresets(false)
-      return
-    }
+    if (existingNames.includes(preset.name.toLowerCase())) return
 
+    const needsEnv = preset.envHints?.length || preset.envHint
+    if (needsEnv) {
+      setPendingPreset(preset)
+      setPresetEnvValues({})
+      setShowPresets(false)
+    } else {
+      submitPreset(preset, undefined)
+    }
+  }
+
+  const submitPreset = async (preset: MCPPreset, env: string | undefined) => {
     setAdding(true)
     try {
-      let env: string | undefined
-      if (preset.envHint) {
-        const value = prompt(`Nhập ${preset.envHint}:`)
-        if (!value) { setAdding(false); return }
-        env = JSON.stringify({ [preset.envHint]: value })
-      }
-
       const server = await addServer({
         name: preset.name,
-        transportType: 'stdio',
-        command: preset.command,
-        args: preset.args,
+        transportType: preset.transport,
+        command: preset.transport === 'stdio' ? preset.command : undefined,
+        args: preset.transport === 'stdio' ? preset.args : undefined,
+        serverUrl: preset.serverUrl,
         env,
       })
+      setPendingPreset(null)
+      setPresetEnvValues({})
       setShowPresets(false)
       if (server) {
         await connectServer(server.id)
@@ -163,32 +195,49 @@ export function MCPServerList({ expanded, onToggle }: MCPServerListProps) {
           )}
 
           {showPresets && (
-            <div className="space-y-1.5">
-              <p className="text-[11px] text-[var(--text-tertiary)] font-medium uppercase tracking-wider mb-2">Chọn server để thêm</p>
-              {MCP_PRESETS.map(preset => {
-                const alreadyAdded = servers.some(s => s.name.toLowerCase() === preset.name.toLowerCase())
+            <div className="space-y-3">
+              <p className="text-[11px] text-[var(--text-tertiary)] font-medium uppercase tracking-wider">Chọn server để thêm</p>
+              {PRESET_CATEGORIES.map(cat => {
+                const categoryPresets = MCP_PRESETS.filter(p => p.category === cat.key)
+                if (categoryPresets.length === 0) return null
                 return (
-                  <button
-                    key={preset.name}
-                    onClick={() => !alreadyAdded && handlePreset(preset)}
-                    disabled={adding || alreadyAdded}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left',
-                      alreadyAdded
-                        ? 'border-[var(--border-primary)] bg-[var(--bg-secondary)] opacity-50 cursor-not-allowed'
-                        : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] hover:border-[var(--accent-primary)] hover:bg-[var(--accent-light)] cursor-pointer'
-                    )}
-                  >
-                    <Terminal size={14} className="text-[var(--text-tertiary)] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium text-[var(--text-primary)]">{preset.name}</p>
-                      <p className="text-[11px] text-[var(--text-tertiary)] truncate">{preset.command} {preset.args}</p>
+                  <div key={cat.key}>
+                    <p className="text-[10px] text-[var(--accent-primary)] font-semibold uppercase tracking-wider mb-1.5">{cat.label}</p>
+                    <div className="space-y-1.5">
+                      {categoryPresets.map(preset => {
+                        const alreadyAdded = servers.some(s => s.name.toLowerCase() === preset.name.toLowerCase())
+                        return (
+                          <button
+                            key={preset.name}
+                            onClick={() => !alreadyAdded && handlePresetClick(preset)}
+                            disabled={adding || alreadyAdded}
+                            className={cn(
+                              'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all text-left',
+                              alreadyAdded
+                                ? 'border-[var(--border-primary)] bg-[var(--bg-secondary)] opacity-50 cursor-not-allowed'
+                                : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] hover:border-[var(--accent-primary)] hover:bg-[var(--accent-light)] cursor-pointer'
+                            )}
+                          >
+                            {preset.transport === 'sse' ? (
+                              <Globe size={14} className="text-[var(--text-tertiary)] shrink-0" />
+                            ) : (
+                              <Terminal size={14} className="text-[var(--text-tertiary)] shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-medium text-[var(--text-primary)]">{preset.name}</p>
+                              <p className="text-[11px] text-[var(--text-tertiary)] truncate">
+                                {preset.description || (preset.command ? `${preset.command} ${preset.args || ''}` : preset.serverUrl)}
+                              </p>
+                            </div>
+                            {alreadyAdded && <span className="text-[10px] text-[var(--text-tertiary)]">Đã thêm</span>}
+                            {(preset.envHint || preset.envHints) && !alreadyAdded && (
+                              <span className="text-[10px] text-amber-500 shrink-0">Cần token</span>
+                            )}
+                          </button>
+                        )
+                      })}
                     </div>
-                    {alreadyAdded && <span className="text-[10px] text-[var(--text-tertiary)]">Đã thêm</span>}
-                    {preset.envHint && !alreadyAdded && (
-                      <span className="text-[10px] text-amber-500 shrink-0">Cần token</span>
-                    )}
-                  </button>
+                  </div>
                 )
               })}
               <div className="flex gap-2 mt-2">
@@ -198,6 +247,66 @@ export function MCPServerList({ expanded, onToggle }: MCPServerListProps) {
                 <button onClick={() => { setShowPresets(false); setAddOpen(true) }} className="text-[11px] text-[var(--accent-primary)] hover:underline">
                   Thêm thủ công
                 </button>
+              </div>
+            </div>
+          )}
+
+          {pendingPreset && (
+            <div className="space-y-2 px-3 py-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--accent-primary)]">
+              <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+                Cấu hình {pendingPreset.name}
+              </p>
+              {pendingPreset.envHints?.map(hint => (
+                <div key={hint.key}>
+                  <label className="text-[11px] text-[var(--text-tertiary)] mb-1 block">{hint.label}</label>
+                  <Input
+                    type={hint.secret ? 'password' : 'text'}
+                    className="!py-1.5 !text-[12px]"
+                    placeholder={hint.key}
+                    value={presetEnvValues[hint.key] || ''}
+                    onChange={e => setPresetEnvValues(prev => ({ ...prev, [hint.key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+              {pendingPreset.envHint && !pendingPreset.envHints && (
+                <div>
+                  <label className="text-[11px] text-[var(--text-tertiary)] mb-1 block">{pendingPreset.envHint}</label>
+                  <Input
+                    type="password"
+                    className="!py-1.5 !text-[12px]"
+                    placeholder={pendingPreset.envHint}
+                    value={presetEnvValues[pendingPreset.envHint] || ''}
+                    onChange={e => setPresetEnvValues(prev => ({ ...prev, [pendingPreset.envHint!]: e.target.value }))}
+                  />
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={adding || (() => {
+                    if (pendingPreset.envHints) return pendingPreset.envHints.filter(h => h.required !== false).some(h => !presetEnvValues[h.key]?.trim())
+                    if (pendingPreset.envHint) return !presetEnvValues[pendingPreset.envHint]?.trim()
+                    return false
+                  })()}
+                  onClick={() => {
+                    const envObj: Record<string, string> = {}
+                    if (pendingPreset.envHints) {
+                      for (const h of pendingPreset.envHints) {
+                        if (presetEnvValues[h.key]?.trim()) envObj[h.key] = presetEnvValues[h.key]
+                      }
+                    } else if (pendingPreset.envHint) {
+                      envObj[pendingPreset.envHint] = presetEnvValues[pendingPreset.envHint]
+                    }
+                    const envStr = Object.keys(envObj).length > 0 ? JSON.stringify(envObj) : undefined
+                    submitPreset(pendingPreset, envStr)
+                  }}
+                >
+                  {adding ? <><Loader2 size={12} className="animate-spin" /> Đang thêm...</> : 'Xác nhận'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setPendingPreset(null); setPresetEnvValues({}) }}>
+                  Hủy
+                </Button>
               </div>
             </div>
           )}

@@ -1,19 +1,28 @@
 /**
- * ComfyUI Client — Connects to ComfyUI Docker instance via REST API
+ * ComfyUI Cloud Client — Connects to Comfy Cloud API (cloud.comfy.org)
  *
- * ComfyUI runs as Docker container on localhost:8188.
- * API: POST /api/prompt (submit workflow), GET /view (download image)
- * WebSocket ws://host:8188/ws for real-time progress.
+ * No Docker/GPU needed. Uses cloud GPU infrastructure.
+ * API: POST /api/prompt, GET /api/job/{id}/status, GET /api/view
+ * Auth: X-API-Key header from platform.comfy.org
  */
 
 import { getSetting, setSetting } from './settings-service'
-import { randomUUID } from 'crypto'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname } from 'path'
 
+const CLOUD_BASE_URL = 'https://cloud.comfy.org'
+
+export function getComfyUIApiKey(): string {
+  return getSetting('comfyui_api_key') || ''
+}
+
+export function setComfyUIApiKey(key: string): void {
+  setSetting('comfyui_api_key', key, true)
+}
+
 export function getComfyUIUrl(): string {
-  return getSetting('comfyui_url') || ''
+  return getSetting('comfyui_url') || CLOUD_BASE_URL
 }
 
 export function setComfyUIUrl(url: string): void {
@@ -21,27 +30,27 @@ export function setComfyUIUrl(url: string): void {
 }
 
 export function isComfyUIConfigured(): boolean {
-  return getComfyUIUrl().length > 0
+  return getComfyUIApiKey().length > 0
 }
 
-export async function testComfyUIConnection(): Promise<{ ok: boolean; version?: string; gpu?: string; error?: string }> {
-  const url = getComfyUIUrl()
-  if (!url) return { ok: false, error: 'ComfyUI URL not configured' }
+function getHeaders(): Record<string, string> {
+  return {
+    'X-API-Key': getComfyUIApiKey(),
+    'Content-Type': 'application/json'
+  }
+}
+
+export async function testComfyUIConnection(): Promise<{ ok: boolean; error?: string }> {
+  if (!isComfyUIConfigured()) return { ok: false, error: 'ComfyUI API key not configured' }
 
   try {
-    const response = await fetch(`${url}/system_stats`, { signal: AbortSignal.timeout(5000) })
+    const response = await fetch(`${getComfyUIUrl()}/api/user`, {
+      headers: getHeaders(),
+      signal: AbortSignal.timeout(10000)
+    })
+    if (response.status === 401) return { ok: false, error: 'Invalid API key' }
     if (!response.ok) return { ok: false, error: `HTTP ${response.status}` }
-
-    const stats = await response.json() as {
-      system?: { comfyui_version?: string }
-      devices?: Array<{ name?: string; vram_total?: number }>
-    }
-
-    return {
-      ok: true,
-      version: stats.system?.comfyui_version,
-      gpu: stats.devices?.[0]?.name
-    }
+    return { ok: true }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
@@ -95,99 +104,104 @@ export async function generateImageViaComfyUI(
   prompt: string,
   options: { width?: number; height?: number; steps?: number; savePath?: string } = {}
 ): Promise<{ imagePath: string; sizeKB: number } | { error: string }> {
-  const url = getComfyUIUrl()
-  if (!url) return { error: 'ComfyUI URL not configured' }
+  if (!isComfyUIConfigured()) return { error: 'ComfyUI API key not configured' }
 
+  const baseUrl = getComfyUIUrl()
   const { width = 1024, height = 1024, steps = 20 } = options
-  const clientId = randomUUID()
   const workflow = buildTextToImageWorkflow(prompt, width, height, steps)
 
-  console.log(`[ComfyUI] Submitting workflow: "${prompt.slice(0, 60)}..." (${width}x${height}, ${steps} steps)`)
+  console.log(`[ComfyUI Cloud] Submitting: "${prompt.slice(0, 60)}..." (${width}x${height}, ${steps} steps)`)
 
   try {
-    const promptResponse = await fetch(`${url}/api/prompt`, {
+    const submitResponse = await fetch(`${baseUrl}/api/prompt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: workflow, client_id: clientId }),
-      signal: AbortSignal.timeout(10000)
+      headers: getHeaders(),
+      body: JSON.stringify({ prompt: workflow }),
+      signal: AbortSignal.timeout(15000)
     })
 
-    if (!promptResponse.ok) {
-      const errBody = await promptResponse.text().catch(() => '')
-      return { error: `ComfyUI prompt submit failed (${promptResponse.status}): ${errBody.slice(0, 200)}` }
+    if (submitResponse.status === 401) return { error: 'Invalid ComfyUI API key' }
+    if (submitResponse.status === 402) return { error: 'Insufficient ComfyUI credits' }
+    if (!submitResponse.ok) {
+      const errBody = await submitResponse.text().catch(() => '')
+      return { error: `ComfyUI submit failed (${submitResponse.status}): ${errBody.slice(0, 200)}` }
     }
 
-    const promptResult = await promptResponse.json() as { prompt_id?: string; error?: string }
-    if (!promptResult.prompt_id) {
-      return { error: `ComfyUI returned no prompt_id: ${JSON.stringify(promptResult).slice(0, 200)}` }
-    }
+    const result = await submitResponse.json() as { prompt_id?: string }
+    if (!result.prompt_id) return { error: 'No prompt_id returned' }
 
-    const promptId = promptResult.prompt_id
-    console.log(`[ComfyUI] Prompt submitted: ${promptId}`)
+    console.log(`[ComfyUI Cloud] Job: ${result.prompt_id}`)
 
-    const imagePath = await waitForImage(url, promptId, clientId, options.savePath)
-    if (!imagePath) return { error: 'ComfyUI did not produce an image' }
+    const imagePath = await pollForImage(baseUrl, result.prompt_id, options.savePath)
+    if (!imagePath) return { error: 'ComfyUI did not produce an image (timeout)' }
 
     const stats = require('fs').statSync(imagePath)
     const sizeKB = Math.round(stats.size / 1024)
-    console.log(`[ComfyUI] Image generated: ${imagePath} (${sizeKB}KB)`)
+    console.log(`[ComfyUI Cloud] Done: ${imagePath} (${sizeKB}KB)`)
 
     return { imagePath, sizeKB }
   } catch (err) {
-    return { error: `ComfyUI error: ${(err as Error).message}` }
+    return { error: `ComfyUI Cloud error: ${(err as Error).message}` }
   }
 }
 
-async function waitForImage(
+async function pollForImage(
   baseUrl: string,
   promptId: string,
-  clientId: string,
   savePath?: string,
   timeoutMs: number = 120000
 ): Promise<string | null> {
-  const startTime = Date.now()
+  const start = Date.now()
 
-  while (Date.now() - startTime < timeoutMs) {
+  while (Date.now() - start < timeoutMs) {
     try {
-      const historyResponse = await fetch(`${baseUrl}/history/${promptId}`, { signal: AbortSignal.timeout(5000) })
-      if (!historyResponse.ok) {
-        await new Promise(r => setTimeout(r, 1000))
+      const statusResponse = await fetch(`${baseUrl}/api/job/${promptId}/status`, {
+        headers: getHeaders(),
+        signal: AbortSignal.timeout(5000)
+      })
+
+      if (!statusResponse.ok) {
+        await sleep(2000)
         continue
       }
 
-      const history = await historyResponse.json() as Record<string, {
-        outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }>
-      }>
+      const job = await statusResponse.json() as { status?: string; outputs?: Record<string, { images?: Array<{ filename: string; subfolder?: string; type?: string }> }> }
 
-      const entry = history[promptId]
-      if (!entry?.outputs) {
-        await new Promise(r => setTimeout(r, 1000))
-        continue
-      }
+      if (job.status === 'failed') return null
 
-      for (const nodeOutput of Object.values(entry.outputs)) {
-        if (nodeOutput.images && nodeOutput.images.length > 0) {
-          const img = nodeOutput.images[0]
-          const imgUrl = `${baseUrl}/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=${img.type || 'output'}`
+      if (job.status === 'completed' && job.outputs) {
+        for (const nodeOutput of Object.values(job.outputs)) {
+          if (nodeOutput.images && nodeOutput.images.length > 0) {
+            const img = nodeOutput.images[0]
+            const viewUrl = `${baseUrl}/api/view?filename=${encodeURIComponent(img.filename)}&subfolder=${encodeURIComponent(img.subfolder || '')}&type=${img.type || 'output'}`
 
-          const imgResponse = await fetch(imgUrl, { signal: AbortSignal.timeout(30000) })
-          if (!imgResponse.ok) continue
+            const imgResponse = await fetch(viewUrl, {
+              headers: getHeaders(),
+              redirect: 'follow',
+              signal: AbortSignal.timeout(30000)
+            })
+            if (!imgResponse.ok) continue
 
-          const buffer = Buffer.from(await imgResponse.arrayBuffer())
-          const finalPath = savePath || join(tmpdir(), `cortex-comfy-${Date.now()}.png`)
-          const dir = dirname(finalPath)
-          if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-          writeFileSync(finalPath, buffer)
+            const buffer = Buffer.from(await imgResponse.arrayBuffer())
+            const finalPath = savePath || join(tmpdir(), `cortex-comfy-${Date.now()}.png`)
+            const dir = dirname(finalPath)
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+            writeFileSync(finalPath, buffer)
 
-          return finalPath
+            return finalPath
+          }
         }
       }
 
-      await new Promise(r => setTimeout(r, 1000))
+      await sleep(2000)
     } catch {
-      await new Promise(r => setTimeout(r, 2000))
+      await sleep(3000)
     }
   }
 
   return null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
 }

@@ -3,6 +3,11 @@ productName: Cortex
 directories:
   buildResources: build
   output: release
+asarUnpack:
+  - 'node_modules/@lancedb/**'
+  - 'node_modules/kuzu/**'
+  - 'node_modules/better-sqlite3/**'
+  - 'node_modules/sharp/**'
 files:
   - '!**/.vscode/*'
   - '!src/*'

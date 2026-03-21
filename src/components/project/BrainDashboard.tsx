@@ -669,7 +669,7 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                           </div>
                         </div>
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                          {repo.source_type === 'github' ? 'GitHub' : 'Local'} · Sync: {formatTime(repo.last_indexed_at)}
+                          {{ github: 'GitHub', local: 'Local', jira: 'Jira', confluence: 'Confluence' }[repo.source_type] || repo.source_type} · Sync: {formatTime(repo.last_indexed_at)}
                         </p>
                         {repo.source_type === 'github' && (() => {
                           const branchState = getRepoBranch(repo.id)

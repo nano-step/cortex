@@ -71,7 +71,7 @@ import { getProjectToolDefinitions, executeProjectTool } from './services/skills
 import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
 import { getArtistToolDefinitions, executeArtistTool, getHuggingFaceToken, setHuggingFaceToken } from './services/skills/builtin/artist-tools'
 import { orchestrateImageGen } from './services/skills/builtin/image-orchestrator'
-import { getComfyUIUrl, setComfyUIUrl, isComfyUIConfigured, testComfyUIConnection, generateImageViaComfyUI } from './services/comfyui-client'
+import { getComfyUIUrl, setComfyUIUrl, getComfyUIApiKey, setComfyUIApiKey, isComfyUIConfigured, testComfyUIConnection, generateImageViaComfyUI } from './services/comfyui-client'
 import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
@@ -1978,6 +1978,8 @@ Return ONLY the enhanced prompt, nothing else.`
   })
   ipcMain.handle('comfyui:getUrl', () => getComfyUIUrl())
   ipcMain.handle('comfyui:setUrl', (_event, url: string) => { setComfyUIUrl(url); return true })
+  ipcMain.handle('comfyui:getApiKey', () => getComfyUIApiKey() ? '***' : '')
+  ipcMain.handle('comfyui:setApiKey', (_event, key: string) => { setComfyUIApiKey(key); return true })
   ipcMain.handle('comfyui:test', async () => testComfyUIConnection())
 
   ipcMain.handle('settings:getHuggingFaceToken', () => getHuggingFaceToken() || '')

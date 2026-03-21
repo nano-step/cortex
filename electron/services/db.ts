@@ -44,7 +44,7 @@ function initSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS repositories (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      source_type TEXT NOT NULL CHECK(source_type IN ('local', 'github')),
+      source_type TEXT NOT NULL CHECK(source_type IN ('local', 'github', 'jira', 'confluence')),
       source_path TEXT NOT NULL,
       branch TEXT DEFAULT 'main',
       active_branch TEXT NOT NULL DEFAULT 'main',
@@ -234,7 +234,26 @@ function initSchema(database: Database.Database): void {
     `ALTER TABLE repositories ADD COLUMN branch TEXT DEFAULT 'main'`,
     `ALTER TABLE repositories ADD COLUMN active_branch TEXT NOT NULL DEFAULT 'main'`,
     `ALTER TABLE chunks ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
-    `ALTER TABLE conversations ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`
+    `ALTER TABLE conversations ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
+    `ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS repositories_new (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK(source_type IN ('local', 'github', 'jira', 'confluence')),
+      source_path TEXT NOT NULL,
+      branch TEXT DEFAULT 'main',
+      active_branch TEXT NOT NULL DEFAULT 'main',
+      last_indexed_sha TEXT,
+      last_indexed_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'indexing', 'ready', 'error')),
+      error_message TEXT,
+      total_files INTEGER DEFAULT 0,
+      total_chunks INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )`,
+    `INSERT OR IGNORE INTO repositories_new SELECT * FROM repositories`,
+    `DROP TABLE IF EXISTS repositories`,
+    `ALTER TABLE repositories_new RENAME TO repositories`
   ]
   for (const sql of migrations) {
     try {
@@ -427,7 +446,7 @@ export const conversationQueries = {
     db.prepare('SELECT * FROM conversations WHERE id = ?'),
 
   getByProject: (db: Database.Database) =>
-    db.prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY updated_at DESC'),
+    db.prepare('SELECT * FROM conversations WHERE project_id = ? ORDER BY pinned DESC, updated_at DESC'),
 
   updateTitle: (db: Database.Database) =>
     db.prepare('UPDATE conversations SET title = ?, updated_at = unixepoch() * 1000 WHERE id = ?'),
@@ -439,7 +458,10 @@ export const conversationQueries = {
     db.prepare('DELETE FROM conversations WHERE id = ?'),
 
   getByProjectAndBranch: (db: Database.Database) =>
-    db.prepare('SELECT * FROM conversations WHERE project_id = ? AND branch = ? ORDER BY updated_at DESC'),
+    db.prepare('SELECT * FROM conversations WHERE project_id = ? AND branch = ? ORDER BY pinned DESC, updated_at DESC'),
+
+  togglePin: (db: Database.Database) =>
+    db.prepare('UPDATE conversations SET pinned = CASE WHEN pinned = 1 THEN 0 ELSE 1 END WHERE id = ?'),
 }
 
 export const messageQueries = {

@@ -12,7 +12,7 @@ import type {
   SkillInfo,
   HealthStatus
 } from './types'
-import { recordSkillCall, loadSkillMetrics } from './skill-metrics'
+import { recordSkillCall, loadSkillMetrics, getAllSkillMetrics } from './skill-metrics'
 
 const registry = new Map<string, SkillRegistryEntry>()
 
@@ -106,7 +106,28 @@ export function listSkills(filter?: {
     .map(entry => {
       const dbMetrics = loadSkillMetrics(entry.skill.name)
       const inMemMetrics = entry.skill.getMetrics()
-      const mergedMetrics = dbMetrics.totalCalls > inMemMetrics.totalCalls ? dbMetrics : inMemMetrics
+      let mergedMetrics = dbMetrics.totalCalls > inMemMetrics.totalCalls ? dbMetrics : inMemMetrics
+
+      if (mergedMetrics.totalCalls === 0) {
+        const allMetrics = getAllSkillMetrics()
+        const skillPrefix = entry.skill.name.replace(/^mcp-/, '')
+        const aggregated = { totalCalls: 0, successCount: 0, errorCount: 0, avgLatencyMs: 0, lastUsed: null as number | null }
+        let totalLatency = 0
+        for (const [toolName, m] of Object.entries(allMetrics)) {
+          if (toolName.includes(skillPrefix) || toolName.startsWith(entry.skill.name)) {
+            aggregated.totalCalls += m.totalCalls
+            aggregated.successCount += m.successCount
+            aggregated.errorCount += m.errorCount
+            totalLatency += m.avgLatencyMs * m.totalCalls
+            if (m.lastUsed && (!aggregated.lastUsed || m.lastUsed > aggregated.lastUsed)) aggregated.lastUsed = m.lastUsed
+          }
+        }
+        if (aggregated.totalCalls > 0) {
+          aggregated.avgLatencyMs = totalLatency / aggregated.totalCalls
+          mergedMetrics = aggregated
+        }
+      }
+
       return {
         name: entry.skill.name,
         version: entry.skill.version,

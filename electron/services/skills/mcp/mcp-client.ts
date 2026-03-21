@@ -69,8 +69,18 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
 
         const baseUrl = new URL(config.serverUrl)
 
+        const transportOpts: Record<string, unknown> = {}
+        if (config.env) {
+          const authKey = Object.keys(config.env).find(k => /api.key/i.test(k))
+          if (authKey && config.env[authKey]) {
+            transportOpts.requestInit = {
+              headers: { Authorization: `Bearer ${config.env[authKey]}` }
+            }
+          }
+        }
+
         try {
-          const httpTransport = new StreamableHTTPClientTransport(baseUrl)
+          const httpTransport = new StreamableHTTPClientTransport(baseUrl, transportOpts)
           await client.connect(httpTransport)
           transport = httpTransport
           connected = true
@@ -82,7 +92,7 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
             { capabilities: {} }
           )
 
-          const sseTransport = new SSEClientTransport(baseUrl)
+          const sseTransport = new SSEClientTransport(baseUrl, transportOpts)
           await client.connect(sseTransport)
           transport = sseTransport
           connected = true

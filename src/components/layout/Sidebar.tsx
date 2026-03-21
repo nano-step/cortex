@@ -11,7 +11,9 @@ import {
   SquarePen,
   FolderOpen,
   MoreHorizontal,
-  Check
+  Check,
+  Pin,
+  PinOff
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useUIStore } from '../../stores/uiStore'
@@ -23,11 +25,12 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Toggle } from '../ui/Toggle'
 
 // Group conversations by time period (like ChatGPT)
-function groupConversationsByTime(conversations: Array<{ id: string; title: string; createdAt?: number }>) {
+function groupConversationsByTime(conversations: Array<{ id: string; title: string; pinned?: boolean; createdAt?: number }>) {
   const now = Date.now()
   const day = 86400000
   const groups: { label: string; items: typeof conversations }[] = []
 
+  const pinned: typeof conversations = []
   const today: typeof conversations = []
   const yesterday: typeof conversations = []
   const last7: typeof conversations = []
@@ -35,6 +38,7 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
   const older: typeof conversations = []
 
   for (const conv of conversations) {
+    if (conv.pinned) { pinned.push(conv); continue }
     const age = now - (conv.createdAt || 0)
     if (age < day) today.push(conv)
     else if (age < 2 * day) yesterday.push(conv)
@@ -43,6 +47,7 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
     else older.push(conv)
   }
 
+  if (pinned.length) groups.push({ label: '📌 Đã ghim', items: pinned })
   if (today.length) groups.push({ label: 'Hôm nay', items: today })
   if (yesterday.length) groups.push({ label: 'Hôm qua', items: yesterday })
   if (last7.length) groups.push({ label: '7 ngày trước', items: last7 })
@@ -55,7 +60,7 @@ function groupConversationsByTime(conversations: Array<{ id: string; title: stri
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mode, setMode, openNewProjectModal, toggleSettings } = useUIStore()
   const { projects, activeProjectId, setActiveProject, removeProject, activeBranch } = useProjectStore()
-  const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation, renameConversation, isLoadingConversations } = useChatStore()
+  const { conversations, activeConversationId, setActiveConversation, createConversation, deleteConversation, renameConversation, pinConversation, isLoadingConversations } = useChatStore()
 
   const activeProject = projects.find((p) => p.id === activeProjectId)
   const projectConversations = activeProjectId
@@ -401,6 +406,21 @@ export function Sidebar() {
                               ? 'before:bg-gradient-to-r before:from-transparent before:to-[var(--bg-sidebar-active)]'
                               : 'before:bg-gradient-to-r before:from-transparent before:to-[var(--bg-sidebar-hover)]'
                           )}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                pinConversation(conv.id)
+                              }}
+                              className={cn(
+                                'p-1 rounded-md transition-colors',
+                                conv.pinned
+                                  ? 'text-[var(--accent-primary)]'
+                                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+                              )}
+                              title={conv.pinned ? 'Bỏ ghim' : 'Ghim'}
+                            >
+                              {conv.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()

@@ -2,6 +2,8 @@ import { getDb } from '../../db'
 import { createMCPClient, type MCPClient, type MCPClientConfig, type MCPTool, type MCPResource } from './mcp-client'
 import { createMCPSkillsFromServer } from './mcp-adapter'
 import { registerSkill, unregisterSkill } from '../skill-registry'
+import { MCP_PRESETS, type MCPPreset } from './mcp-presets'
+import { setServiceConfig, getServiceConfig } from '../../settings-service'
 
 export interface MCPServerConfig {
   id: string
@@ -304,6 +306,43 @@ export async function callToolByServerName(
   return null
 }
 
+interface CoreMCPServer {
+  name: string
+  transportType: 'stdio' | 'sse'
+  command?: string
+  args?: string
+  serverUrl?: string
+}
+
+const CORE_MCP_SERVERS: CoreMCPServer[] = [
+  {
+    name: 'Jina AI Reader',
+    transportType: 'sse',
+    serverUrl: 'https://mcp.jina.ai/v1',
+  },
+]
+
+export function ensureCoreMCPServers(): void {
+  ensureSchema()
+  const db = getDb()
+
+  for (const core of CORE_MCP_SERVERS) {
+    const existing = db.prepare(
+      'SELECT id FROM mcp_servers WHERE LOWER(name) = ?'
+    ).get(core.name.toLowerCase()) as { id: string } | undefined
+
+    if (existing) continue
+
+    const id = `mcp_core_${core.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+    const now = Date.now()
+    db.prepare(
+      'INSERT INTO mcp_servers (id, name, transport_type, command, args, server_url, env, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)'
+    ).run(id, core.name, core.transportType, core.command || null, core.args || null, core.serverUrl || null, null, now)
+
+    console.log(`[MCPManager] Registered core MCP server: ${core.name}`)
+  }
+}
+
 export async function autoConnectMCPServers(): Promise<number> {
   ensureSchema()
   const db = getDb()
@@ -429,6 +468,82 @@ export async function executeMCPTool(
   }
 
   return { content: `Tool not found: ${prefixedToolName}`, isError: true }
+}
+
+export function isPresetInstalled(presetId: string): boolean {
+  ensureSchema()
+  const db = getDb()
+  const preset = MCP_PRESETS.find(p => p.id === presetId)
+  if (!preset) return false
+  const row = db.prepare('SELECT id FROM mcp_servers WHERE name = ?').get(preset.name)
+  return !!row
+}
+
+export function getPresetStatuses(): Array<MCPPreset & { installed: boolean; configured: boolean; connected: boolean }> {
+  ensureSchema()
+  const db = getDb()
+  const servers = db.prepare('SELECT * FROM mcp_servers').all() as MCPServerRow[]
+  const serversByName = new Map(servers.map(s => [s.name, mapRow(s)]))
+
+  return MCP_PRESETS.map(preset => {
+    const server = serversByName.get(preset.name)
+    const installed = !!server
+    const status = server ? serverStatus.get(server.id) : undefined
+    const hasRequiredEnv = preset.envVars.filter(v => v.required).every(v => {
+      const config = getServiceConfig(`mcp:${preset.id}`)
+      return config && config[v.name]
+    })
+    return {
+      ...preset,
+      installed,
+      configured: installed && (preset.envVars.length === 0 || hasRequiredEnv),
+      connected: !!(status?.connected)
+    }
+  })
+}
+
+export async function installPreset(
+  presetId: string,
+  envValues: Record<string, string>
+): Promise<MCPServerStatus> {
+  const preset = MCP_PRESETS.find(p => p.id === presetId)
+  if (!preset) throw new Error(`Preset not found: ${presetId}`)
+
+  const encryptKeys = preset.envVars.filter(v => v.encrypted).map(v => v.name)
+  if (Object.keys(envValues).length > 0) {
+    setServiceConfig(`mcp:${preset.id}`, envValues, encryptKeys)
+  }
+
+  const envObj: Record<string, string> = {}
+  const storedConfig = getServiceConfig(`mcp:${preset.id}`)
+  if (storedConfig) {
+    for (const [key, value] of Object.entries(storedConfig)) {
+      envObj[key] = value
+    }
+  }
+
+  let args = [...preset.args]
+  if (preset.id === 'filesystem' && envValues['ALLOWED_PATHS']) {
+    args = [...args, ...envValues['ALLOWED_PATHS'].split(',').map(p => p.trim())]
+  }
+
+  const server = addMCPServer({
+    name: preset.name,
+    transportType: preset.transport,
+    command: preset.transport === 'stdio' ? preset.command : undefined,
+    args: preset.transport === 'stdio' ? args.join(' ') : undefined,
+    serverUrl: preset.serverUrl || undefined,
+    env: Object.keys(envObj).length > 0 ? JSON.stringify(envObj) : undefined
+  })
+
+  try {
+    await connectMCPServer(server.id)
+  } catch (err) {
+    console.warn(`[MCPManager] Auto-connect failed for preset ${preset.name}:`, err)
+  }
+
+  const statuses = listMCPServers()
+  return statuses.find(s => s.id === server.id) || server
 }
 
 export async function shutdownAllMCP(): Promise<void> {

@@ -23,6 +23,7 @@ interface ChatState {
   updateLastMessage: (conversationId: string, content: string) => void
   renameConversation: (conversationId: string, newTitle: string) => Promise<void>
   deleteConversation: (conversationId: string) => Promise<void>
+  pinConversation: (conversationId: string) => Promise<void>
   setMessageStreaming: (conversationId: string, messageId: string, isStreaming: boolean) => void
   pushThinkingStep: (conversationId: string, step: StoredThinkingStep) => void
   clearThinkingSteps: (conversationId: string) => void
@@ -37,6 +38,7 @@ function mapDbConversation(row: any, messages: Message[] = []): Conversation {
     title: row.title,
     mode: row.mode as ResponseMode,
     branch: row.branch || 'main',
+    pinned: row.pinned === 1,
     messages,
     createdAt: row.created_at
   }
@@ -196,6 +198,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }))
     } catch (err) {
       console.error('Failed to delete conversation:', err)
+    }
+  },
+
+  pinConversation: async (conversationId) => {
+    console.log(`[ChatStore] pinConversation called: ${conversationId}, API available: ${!!window.electronAPI?.pinConversation}`)
+    if (!window.electronAPI?.pinConversation) {
+      console.warn('[ChatStore] pinConversation API not available — rebuild app')
+      return
+    }
+    try {
+      await window.electronAPI.pinConversation(conversationId)
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId ? { ...c, pinned: !c.pinned } : c
+        )
+      }))
+      console.log(`[ChatStore] Pin toggled for ${conversationId}`)
+    } catch (err) {
+      console.error('Failed to pin conversation:', err)
     }
   },
 
