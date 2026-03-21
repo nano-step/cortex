@@ -1978,7 +1978,7 @@ Return ONLY the enhanced prompt, nothing else.`
   })
   ipcMain.handle('comfyui:getUrl', () => getComfyUIUrl())
   ipcMain.handle('comfyui:setUrl', (_event, url: string) => { setComfyUIUrl(url); return true })
-  ipcMain.handle('comfyui:getApiKey', () => getComfyUIApiKey() ? '***' : '')
+  ipcMain.handle('comfyui:getApiKey', () => getComfyUIApiKey() || '')
   ipcMain.handle('comfyui:setApiKey', (_event, key: string) => { setComfyUIApiKey(key); return true })
   ipcMain.handle('comfyui:test', async () => testComfyUIConnection())
 

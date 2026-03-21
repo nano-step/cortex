@@ -69,6 +69,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [selectedVoyageModel, setSelectedVoyageModelState] = useState('voyage-3-large')
   const [huggingfaceToken, setHuggingfaceToken] = useState('')
   const [showHuggingfaceToken, setShowHuggingfaceToken] = useState(false)
+  const [comfyuiApiKey, setComfyuiApiKey] = useState('')
+  const [showComfyuiKey, setShowComfyuiKey] = useState(false)
   const [openrouterApiKey, setOpenrouterApiKey] = useState('')
   const [showOpenrouterKey, setShowOpenrouterKey] = useState(false)
   const [qdrantUrl, setQdrantUrl] = useState('')
@@ -121,6 +123,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         if (svm) setSelectedVoyageModelState(svm)
         const hft = await window.electronAPI?.getHuggingFaceToken?.()
         if (hft) setHuggingfaceToken(hft)
+        const cfk = await window.electronAPI?.getComfyUIApiKey?.()
+        if (cfk) setComfyuiApiKey(cfk)
         const ork = await window.electronAPI?.getOpenRouterConfig?.()
         if (ork?.apiKey) setOpenrouterApiKey(ork.apiKey)
         const pc = await window.electronAPI?.getPerplexityCookies?.()
@@ -246,6 +250,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       if (huggingfaceToken) {
         await window.electronAPI.setHuggingFaceToken(huggingfaceToken)
       }
+      if (comfyuiApiKey) {
+        await window.electronAPI.setComfyUIApiKey(comfyuiApiKey)
+      }
       if (openrouterApiKey) {
         await window.electronAPI.setOpenRouterApiKey(openrouterApiKey)
       }
@@ -259,7 +266,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false)
     }
-  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, openrouterApiKey])
+  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, comfyuiApiKey, openrouterApiKey])
 
   if (!open) return null
 
@@ -532,6 +539,33 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                 <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
                   Vision (FREE) + Image Generation. Lấy key tại{' '}
                   <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">openrouter.ai/keys</a>
+                </p>
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="block text-[12px] font-medium text-[var(--text-secondary)] mb-1">
+                  ComfyUI Cloud API Key
+                  {comfyuiApiKey && comfyuiApiKey !== '***' && <span className="ml-2 text-[10px] text-green-500">● Active</span>}
+                </label>
+                <div className="relative">
+                  <Input
+                    type={showComfyuiKey ? 'text' : 'password'}
+                    value={comfyuiApiKey}
+                    onChange={(e) => setComfyuiApiKey(e.target.value)}
+                    placeholder="comfy-api-xxxxxxxx"
+                    className="text-[13px] pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowComfyuiKey(!showComfyuiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                  >
+                    {showComfyuiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  Cloud GPU — best quality image gen. Tạo key tại{' '}
+                  <a href="https://platform.comfy.org" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">platform.comfy.org</a>
                 </p>
               </div>
 

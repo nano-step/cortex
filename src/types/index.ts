@@ -430,6 +430,8 @@ declare global {
       offGeneratedImage: (cb: (...args: unknown[]) => void) => void
       getHuggingFaceToken: () => Promise<string>
       setHuggingFaceToken: (token: string) => Promise<boolean>
+      getComfyUIApiKey: () => Promise<string>
+      setComfyUIApiKey: (key: string) => Promise<boolean>
       getVoyageApiKey: () => Promise<string>
       setVoyageApiKey: (key: string) => Promise<boolean>
       getVoyageModels: () => Promise<Array<{ id: string; name: string; dims: number; description: string }>>

@@ -161,6 +161,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setJinaApiKey: (key: string) => ipcRenderer.invoke('settings:setJinaApiKey', key),
   getHuggingFaceToken: () => ipcRenderer.invoke('settings:getHuggingFaceToken'),
   setHuggingFaceToken: (token: string) => ipcRenderer.invoke('settings:setHuggingFaceToken', token),
+  getComfyUIApiKey: () => ipcRenderer.invoke('comfyui:getApiKey'),
+  setComfyUIApiKey: (key: string) => ipcRenderer.invoke('comfyui:setApiKey', key),
   getVoyageApiKey: () => ipcRenderer.invoke('settings:getVoyageApiKey'),
   setVoyageApiKey: (key: string) => ipcRenderer.invoke('settings:setVoyageApiKey', key),
   getVoyageModels: () => ipcRenderer.invoke('settings:getVoyageModels'),
