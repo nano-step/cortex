@@ -71,6 +71,7 @@ import { getProjectToolDefinitions, executeProjectTool } from './services/skills
 import { getVisionToolDefinitions, executeVisionTool } from './services/skills/builtin/vision-tools'
 import { getArtistToolDefinitions, executeArtistTool, getHuggingFaceToken, setHuggingFaceToken } from './services/skills/builtin/artist-tools'
 import { orchestrateImageGen } from './services/skills/builtin/image-orchestrator'
+import { getComfyUIUrl, setComfyUIUrl, isComfyUIConfigured, testComfyUIConnection, generateImageViaComfyUI } from './services/comfyui-client'
 import { getCodeAdvisorToolDefinitions, executeCodeAdvisorTool } from './services/skills/builtin/code-advisor-tools'
 import { getPerplexityToolDefinitions, executePerplexityTool, getPerplexitySession, isPerplexityLoggedIn } from './services/skills/builtin/perplexity-tools'
 import { enqueueMessage, getQueueStatus, getQueueLength, clearQueue } from './services/message-queue'
@@ -992,10 +993,32 @@ Return ONLY the enhanced prompt, nothing else.`
             return { success: true, content: diagramResponse, contextChunks: [] }
           }
 
-          const finalModel = orchResult.model !== 'mermaid' ? orchResult.model : undefined
           const finalPrompt = orchResult.enhancedPrompt + orchResult.promptSuffix
+
+          if (isComfyUIConfigured()) {
+            emitThinking('tool_call', 'running', 'Generating image', `ComfyUI (local GPU) — "${finalPrompt.slice(0, 40)}..."`)
+            const comfyResult = await generateImageViaComfyUI(finalPrompt, { width: 1024, height: 1024, steps: 20 })
+
+            if ('imagePath' in comfyResult) {
+              recordSkillCall('comfyui_generate', true, 0)
+              const imgBuf = readFileSync(comfyResult.imagePath)
+              const imgB64 = imgBuf.toString('base64')
+              const finalResponse = `[CORTEX_IMG:${comfyResult.imagePath}]\n\n*ComfyUI (local) | ${comfyResult.sizeKB}KB | ${orchResult.category}*`
+              mainWindow?.webContents.send('chat:generatedImage', { conversationId, path: comfyResult.imagePath, base64: imgB64, sizeKB: comfyResult.sizeKB })
+              emitThinking('tool_call', 'done', 'Image generated', `ComfyUI: ${comfyResult.sizeKB}KB`)
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: finalResponse, done: true })
+              persistAssistantResponse(conversationId, finalResponse)
+              await stageAfterHooks({ projectId, conversationId, query, response: finalResponse, model: 'comfyui-local', metadata: { path: 'comfyui', category: orchResult.category } }, emitThinking)
+              return { success: true, content: finalResponse, contextChunks: [] }
+            }
+
+            console.warn(`[Chat] ComfyUI failed: ${'error' in comfyResult ? comfyResult.error : 'unknown'}, falling back to HuggingFace`)
+            emitThinking('tool_call', 'done', 'ComfyUI failed', 'Fallback to HuggingFace')
+          }
+
+          const finalModel = orchResult.model !== 'mermaid' ? orchResult.model : undefined
           emitThinking('tool_call', 'running', 'Generating image',
-            `${orchResult.category} → ${orchResult.model.split('/').pop()} — "${finalPrompt.slice(0, 40)}..."`)
+            `${orchResult.category} → HuggingFace FLUX.1 — "${finalPrompt.slice(0, 40)}..."`)
 
           try {
             const toolArgs: Record<string, string> = { prompt: finalPrompt }
@@ -1953,6 +1976,10 @@ Return ONLY the enhanced prompt, nothing else.`
     setJinaApiKey(key)
     return true
   })
+  ipcMain.handle('comfyui:getUrl', () => getComfyUIUrl())
+  ipcMain.handle('comfyui:setUrl', (_event, url: string) => { setComfyUIUrl(url); return true })
+  ipcMain.handle('comfyui:test', async () => testComfyUIConnection())
+
   ipcMain.handle('settings:getHuggingFaceToken', () => getHuggingFaceToken() || '')
   ipcMain.handle('settings:setHuggingFaceToken', (_event, token: string) => {
     setHuggingFaceToken(token)
