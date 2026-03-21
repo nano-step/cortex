@@ -171,7 +171,7 @@ async function generateViaHuggingFace(prompt: string, modelId: string, width: nu
     model: modelId,
     inputs: prompt,
     parameters: {
-      num_inference_steps: modelId.includes('schnell') ? 4 : 20
+      num_inference_steps: 12
     }
   })
 
