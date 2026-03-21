@@ -10,6 +10,7 @@
  */
 
 import { getProxyUrl, getProxyKey } from '../../settings-service'
+import { isOpenRouterConfigured } from '../efficiency/openrouter-fallback'
 
 export type ImageCategory = 'diagram' | 'photo' | 'art' | 'marketing' | 'ui' | 'general'
 
@@ -45,13 +46,17 @@ const CATEGORY_PATTERNS: Array<{ category: ImageCategory; patterns: RegExp }> = 
   }
 ]
 
-const MODEL_BY_CATEGORY: Record<ImageCategory, string> = {
-  diagram: 'mermaid',
-  photo: 'black-forest-labs/FLUX.1-schnell',
-  art: 'black-forest-labs/FLUX.1-dev',
-  marketing: 'black-forest-labs/FLUX.1-dev',
-  ui: 'stabilityai/stable-diffusion-xl-base-1.0',
-  general: 'black-forest-labs/FLUX.1-schnell'
+function getModelForCategory(category: ImageCategory): string {
+  if (category === 'diagram') return 'mermaid'
+  if (isOpenRouterConfigured()) {
+    const paid: Partial<Record<ImageCategory, string>> = {
+      art: 'google/gemini-3.1-flash-image-preview',
+      marketing: 'google/gemini-3.1-flash-image-preview',
+      ui: 'google/gemini-3.1-flash-image-preview'
+    }
+    return paid[category] || 'black-forest-labs/FLUX.1-schnell'
+  }
+  return 'black-forest-labs/FLUX.1-schnell'
 }
 
 const PROMPT_SUFFIX: Record<ImageCategory, string> = {
@@ -75,7 +80,7 @@ export async function orchestrateImageGen(
   rawPrompt: string
 ): Promise<OrchestratorResult> {
   const category = detectImageCategory(query)
-  const model = MODEL_BY_CATEGORY[category]
+  const model = getModelForCategory(category)
   const promptSuffix = PROMPT_SUFFIX[category]
 
   console.log(`[ImageOrchestrator] Category: ${category} → model: ${model}`)
