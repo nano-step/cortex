@@ -334,7 +334,8 @@ export async function executeArtistTool(
         const dims = ASPECT_RATIOS[aspectRatio] || ASPECT_RATIOS['1:1']
 
         const model = IMAGE_MODELS.find(m => m.id === modelId) || IMAGE_MODELS.find(m => m.id === getDefaultModel())!
-        const provider = model.provider as string
+        const provider = model?.provider as string || 'huggingface'
+        console.log(`[Artist] Model: ${modelId} → provider: ${provider}, found: ${!!IMAGE_MODELS.find(m => m.id === modelId)}`)
 
         let result: { imageBase64: string | null; text: string }
 
@@ -345,6 +346,7 @@ export async function executeArtistTool(
           result = await generateViaOpenRouter(fullPrompt, modelId, referenceImage)
         }
 
+        console.log(`[Artist] Result: base64=${result.imageBase64 ? `${result.imageBase64.length}chars` : 'NULL'}, text=${result.text ? `${result.text.length}chars` : 'EMPTY'}`)
         const parts: string[] = []
         if (result.text) parts.push(result.text)
 
