@@ -10,7 +10,7 @@
  */
 
 import { getProxyUrl, getProxyKey } from '../../settings-service'
-import { isOpenRouterConfigured } from '../efficiency/openrouter-fallback'
+import { getHuggingFaceToken } from './artist-tools'
 
 export type ImageCategory = 'diagram' | 'photo' | 'art' | 'marketing' | 'ui' | 'general'
 
@@ -21,6 +21,11 @@ export interface OrchestratorResult {
   useMermaid: boolean
   mermaidCode?: string
   promptSuffix: string
+}
+
+function getModelForCategory(category: ImageCategory): string {
+  if (category === 'diagram') return 'mermaid'
+  return 'black-forest-labs/FLUX.1-schnell'
 }
 
 const CATEGORY_PATTERNS: Array<{ category: ImageCategory; patterns: RegExp }> = [
@@ -45,19 +50,6 @@ const CATEGORY_PATTERNS: Array<{ category: ImageCategory; patterns: RegExp }> = 
     patterns: /(photo|realistic|portrait|landscape|nature|street|product photo|food|ảnh|chân dung|phong cảnh|sản phẩm)/i
   }
 ]
-
-function getModelForCategory(category: ImageCategory): string {
-  if (category === 'diagram') return 'mermaid'
-  if (isOpenRouterConfigured()) {
-    const paid: Partial<Record<ImageCategory, string>> = {
-      art: 'google/gemini-3.1-flash-image-preview',
-      marketing: 'google/gemini-3.1-flash-image-preview',
-      ui: 'google/gemini-3.1-flash-image-preview'
-    }
-    return paid[category] || 'black-forest-labs/FLUX.1-schnell'
-  }
-  return 'black-forest-labs/FLUX.1-schnell'
-}
 
 const PROMPT_SUFFIX: Record<ImageCategory, string> = {
   diagram: '',
