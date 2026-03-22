@@ -9,7 +9,8 @@ import { orchestrate } from './services/agents/agent-orchestrator'
 import { initNanoBrain, getNanoBrainStatus, queryNanoBrain, listCollections, triggerEmbedding } from './services/nano-brain-service'
 import { randomUUID } from 'crypto'
 import { buildPrompt, streamChatCompletion, fetchAvailableModels, getActiveModel, getAvailableModels, setActiveModel, setMainWindow, getAutoRotation, setAutoRotation, clearAuthFailedModels, refreshModelsWithCheck, type ChatMode, type ChatMessage, type ProjectContext } from './services/llm-client'
-import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, listBranches, getCurrentBranch } from './services/git-service'
+import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, listBranches, getCurrentBranch, listOrgRepos } from './services/git-service'
+import type { OrgRepo } from './services/git-service'
 import { syncGithubRepo, syncLocalRepo, startFileWatcher, stopFileWatcher, stopAllWatchers, indexBranch } from './services/sync-engine'
 import { analyzeArchitecture } from './services/architecture-analyzer'
 import { analyzeImpact } from './services/impact-analyzer'
@@ -25,7 +26,8 @@ import {
   getGitConfig, setGitConfig, testProxyConnection, getSetting, setSetting,
   getGitHubPAT, setGitHubPAT, getAtlassianConfig,
   getQdrantConfig, setQdrantConfig, getJinaApiKey, setJinaApiKey,
-  getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider
+  getVoyageApiKey, setVoyageApiKey, getEmbeddingProvider,
+  getGitHubModelsEmbeddingEnabled, setGitHubModelsEmbeddingEnabled
 } from './services/settings-service'
 import { testJiraConnection, fetchJiraProjects, fetchProjectIssues, issueToChunkContent } from './services/jira-service'
 import { fetchSpaces, fetchPagesBySpace, pageToChunkContent } from './services/confluence-service'
@@ -42,7 +44,7 @@ import { JiraContextSource } from './services/jira-context-source'
 import { ConfluenceContextSource } from './services/confluence-context-source'
 import { GitHubContextSource } from './services/github-context-source'
 import { WebSearchContextSource } from './services/websearch-context-source'
-import { embedQuery, embedProjectChunks, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus, VOYAGE_MODELS, getSelectedVoyageModel, setSelectedVoyageModel } from './services/embedder'
+import { embedQuery, embedProjectChunks, preloadEmbeddingModel, EMBEDDING_DIMENSIONS, getEmbedderStatus, getThrottleStatus, VOYAGE_MODELS, getSelectedVoyageModel, setSelectedVoyageModel } from './services/embedder'
 import { resetQdrantClient } from './services/qdrant-store'
 import { initSkillMetricsTable, recordSkillCall, getAllSkillMetrics } from './services/skills/skill-metrics'
 
@@ -471,6 +473,80 @@ app.whenReady().then(() => {
   )
 
   // =====================
+  // IPC: Organization Import
+  // =====================
+  ipcMain.handle('org:listRepos', async (_event, orgUrl: string, token: string) => {
+    const match = orgUrl.match(/github\.com\/(?:orgs\/)?([^/]+)\/?$/)
+    if (!match) throw new Error('Invalid org URL. Expected: https://github.com/orgs/ORG_NAME')
+    return listOrgRepos(match[1], token)
+  })
+
+  ipcMain.handle(
+    'org:importAll',
+    async (_event, projectId: string, repos: OrgRepo[], token: string) => {
+      const db = getDb()
+      const results: Array<{ name: string; repoId: string; status: string; error?: string }> = []
+
+      for (let i = 0; i < repos.length; i++) {
+        const repo = repos[i]
+        const repoId = randomUUID()
+
+        mainWindow?.webContents.send('org:importProgress', {
+          projectId,
+          current: i + 1,
+          total: repos.length,
+          repoName: repo.name,
+          phase: 'cloning'
+        })
+
+        try {
+          storeGitHubToken(repoId, token)
+          repoQueries.create(db).run(repoId, projectId, 'github', repo.htmlUrl, repo.defaultBranch)
+          repoQueries.updateStatus(db).run('indexing', null, repoId)
+
+          const cloneResult = await cloneRepository(repo.cloneUrl, repoId, token, repo.defaultBranch)
+
+          mainWindow?.webContents.send('org:importProgress', {
+            projectId,
+            current: i + 1,
+            total: repos.length,
+            repoName: repo.name,
+            phase: 'indexing'
+          })
+
+          await indexLocalRepository(projectId, repoId, cloneResult.localPath, mainWindow, cloneResult.branch)
+          repoQueries.updateActiveBranch(db).run(cloneResult.branch, repoId)
+          repoQueries.updateIndexed(db).run(cloneResult.latestSha, Date.now(), 'ready', 0, 0, repoId)
+
+          results.push({ name: repo.name, repoId, status: 'ready' })
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err)
+          repoQueries.updateStatus(db).run('error', errorMsg, repoId)
+          results.push({ name: repo.name, repoId, status: 'error', error: errorMsg })
+        }
+
+        mainWindow?.webContents.send('org:importProgress', {
+          projectId,
+          current: i + 1,
+          total: repos.length,
+          repoName: repo.name,
+          phase: results[results.length - 1].status === 'ready' ? 'done' : 'error'
+        })
+      }
+
+      mainWindow?.webContents.send('org:importProgress', {
+        projectId,
+        current: repos.length,
+        total: repos.length,
+        repoName: '',
+        phase: 'complete'
+      })
+
+      return results
+    }
+  )
+
+  // =====================
   // IPC: Brain search
   // =====================
   ipcMain.handle(
@@ -569,7 +645,8 @@ For AMBIGUOUS queries (multiple valid interpretations):
 
 [tool-usage-rules]
 CRITICAL: You MUST use tools when the user's request matches these patterns:
-- "Vẽ", "generate image", "tạo ảnh", "draw", "create image" → MUST call cortex_generate_image
+- "Vẽ ảnh", "generate image", "tạo ảnh", "draw picture", "create image" → MUST call cortex_generate_image
+- "Vẽ architecture", "vẽ diagram", "vẽ sơ đồ", "draw architecture", "draw diagram" → DO NOT generate image. Instead, analyze codebase and respond with Mermaid diagrams or structured text
 - "Phân tích ảnh", "analyze image", "đọc ảnh" → MUST call cortex_analyze_image
 - "Bao nhiêu người", "contributors", "team" → MUST call cortex_git_contributors
 - "Tìm config", "env var", "setting" → MUST call cortex_search_config
@@ -1961,6 +2038,7 @@ Return ONLY the enhanced prompt, nothing else.`
       hasJinaKey: !!getJinaApiKey()
     }
   })
+  ipcMain.handle('embedder:getThrottleStatus', () => getThrottleStatus())
   ipcMain.handle('settings:getQdrantConfig', () => {
     return getQdrantConfig() || { url: '', apiKey: '' }
   })
@@ -1999,6 +2077,8 @@ Return ONLY the enhanced prompt, nothing else.`
     return true
   })
   ipcMain.handle('settings:getEmbeddingProvider', () => getEmbeddingProvider())
+  ipcMain.handle('settings:getGitHubModelsEmbeddingEnabled', () => getGitHubModelsEmbeddingEnabled())
+  ipcMain.handle('settings:setGitHubModelsEmbeddingEnabled', (_event, enabled: boolean) => { setGitHubModelsEmbeddingEnabled(enabled); return true })
   ipcMain.handle('settings:getVoyageModels', () => VOYAGE_MODELS)
   ipcMain.handle('settings:getSelectedVoyageModel', () => getSelectedVoyageModel())
   ipcMain.handle('settings:setSelectedVoyageModel', (_event, modelId: string) => { setSelectedVoyageModel(modelId); return true })
@@ -2097,16 +2177,15 @@ Return ONLY the enhanced prompt, nothing else.`
     } catch (e) { results.proxy = { status: 'error', detail: String(e) } }
 
     // Embedding
-    const voyageKey = getVoyageApiKey()
-    const jinaKey = getJinaApiKey()
-    if (voyageKey || jinaKey) {
+    const embeddingProvider = getEmbeddingProvider()
+    if (embeddingProvider !== 'proxy') {
       try {
         const start = Date.now()
         const emb = await embedQuery('health check')
-        results.embedding = { status: 'ok', detail: `${getEmbeddingProvider()} (${emb.length} dims)`, latencyMs: Date.now() - start }
+        results.embedding = { status: 'ok', detail: `${embeddingProvider} (${emb.length} dims)`, latencyMs: Date.now() - start }
       } catch (e) { results.embedding = { status: 'error', detail: String(e) } }
     } else {
-      results.embedding = { status: 'missing', detail: 'Set Voyage or Jina API key' }
+      results.embedding = { status: 'missing', detail: 'Set Voyage, Jina API key, or enable GitHub Models Embedding' }
     }
 
     // Qdrant

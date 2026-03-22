@@ -28,6 +28,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('repo:importGithub', projectId, repoUrl, token, branch),
   checkGithubAccess: (repoUrl: string, token?: string) =>
     ipcRenderer.invoke('github:checkAccess', repoUrl, token),
+  listOrgRepos: (orgUrl: string, token: string) =>
+    ipcRenderer.invoke('org:listRepos', orgUrl, token),
+  importOrgRepos: (projectId: string, repos: any[], token: string) =>
+    ipcRenderer.invoke('org:importAll', projectId, repos, token),
   deleteRepo: (repoId: string) =>
     ipcRenderer.invoke('repo:delete', repoId),
 
@@ -101,6 +105,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('sync:progress', handler)
   },
 
+  onOrgImportProgress: (callback: (data: { projectId: string; current: number; total: number; repoName: string; phase: string }) => void) => {
+    const handler = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('org:importProgress', handler)
+    return () => ipcRenderer.removeListener('org:importProgress', handler)
+  },
+
   onFileChanged: (callback: (data: { repoId: string }) => void) => {
     const handler = (_event: any, data: any) => callback(data)
     ipcRenderer.on('sync:fileChanged', handler)
@@ -154,6 +164,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setLLMConfig: (maxTokens: number, contextMessages: number) =>
     ipcRenderer.invoke('settings:setLLMConfig', maxTokens, contextMessages),
   getEmbeddingConfig: () => ipcRenderer.invoke('settings:getEmbeddingConfig'),
+  getEmbeddingThrottleStatus: () => ipcRenderer.invoke('embedder:getThrottleStatus'),
   testEmbeddingConnection: () => ipcRenderer.invoke('settings:testEmbeddingConnection'),
   getQdrantConfig: () => ipcRenderer.invoke('settings:getQdrantConfig'),
   setQdrantConfig: (url: string, apiKey: string) => ipcRenderer.invoke('settings:setQdrantConfig', url, apiKey),
@@ -168,6 +179,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getVoyageModels: () => ipcRenderer.invoke('settings:getVoyageModels'),
   getSelectedVoyageModel: () => ipcRenderer.invoke('settings:getSelectedVoyageModel'),
   setSelectedVoyageModel: (modelId: string) => ipcRenderer.invoke('settings:setSelectedVoyageModel', modelId),
+  getGitHubModelsEmbeddingEnabled: () => ipcRenderer.invoke('settings:getGitHubModelsEmbeddingEnabled'),
+  setGitHubModelsEmbeddingEnabled: (enabled: boolean) => ipcRenderer.invoke('settings:setGitHubModelsEmbeddingEnabled', enabled),
   getOpenRouterConfig: () => ipcRenderer.invoke('openrouter:getConfig'),
   setOpenRouterApiKey: (key: string) => ipcRenderer.invoke('openrouter:setApiKey', key),
   getPerplexityCookies: () => ipcRenderer.invoke('settings:getPerplexityCookies'),

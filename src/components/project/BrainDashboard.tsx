@@ -28,7 +28,9 @@ import {
   Unplug,
   Sparkles,
   TrendingUp,
-  Gauge
+  Gauge,
+  Building,
+  Check
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
@@ -78,7 +80,7 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
 
   // Add repo form
   const [addRepoOpen, setAddRepoOpen] = useState(false)
-  const [addRepoType, setAddRepoType] = useState<'local' | 'github' | 'jira' | 'confluence' | null>(null)
+  const [addRepoType, setAddRepoType] = useState<'local' | 'github' | 'github-org' | 'jira' | 'confluence' | null>(null)
   const [addRepoUrl, setAddRepoUrl] = useState('')
   const [addRepoToken, setAddRepoToken] = useState('')
   const [addRepoLoading, setAddRepoLoading] = useState(false)
@@ -91,6 +93,11 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const [selectedJiraKey, setSelectedJiraKey] = useState('')
   const [selectedConfluenceSpace, setSelectedConfluenceSpace] = useState('')
 
+  const [orgRepos, setOrgRepos] = useState<Array<{ name: string; fullName: string; htmlUrl: string; cloneUrl: string; language: string | null; isPrivate: boolean; description: string | null; defaultBranch: string }>>([])
+  const [selectedOrgRepos, setSelectedOrgRepos] = useState<Set<string>>(new Set())
+  const [orgImportProgress, setOrgImportProgress] = useState<{ current: number; total: number; repoName: string; phase: string } | null>(null)
+  const [orgResults, setOrgResults] = useState<Array<{ name: string; status: string; error?: string }>>([])
+
   const [learningStats, setLearningStats] = useState<{
     totalFeedback: number; totalTrainingPairs: number; totalLearnedWeights: number
     positiveRatio: number; lastTrainedAt: number | null
@@ -100,6 +107,16 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const [trainResult, setTrainResult] = useState<{ trained: number; weights: number; optimized: boolean } | null>(null)
   const [learningOpen, setLearningOpen] = useState(true)
   const [mcpOpen, setMcpOpen] = useState(false)
+
+  const [throttleStatus, setThrottleStatus] = useState<Array<{ provider: string; rpmCurrent: number; rpmLastMinute: number; requestsPerMinute: number; requestsToday: number; requestsPerDay: number; totalRequestsSession: number; dailyQuotaExhausted: boolean; recoveryTimeMs: number }>>([])
+
+  useEffect(() => {
+    if (!open) return
+    const poll = () => window.electronAPI.getEmbeddingThrottleStatus?.().then(setThrottleStatus).catch(() => {})
+    poll()
+    const interval = setInterval(poll, 5_000)
+    return () => clearInterval(interval)
+  }, [open])
 
   const [atlassianOpen, setAtlassianOpen] = useState(false)
   const [atlSiteUrl, setAtlSiteUrl] = useState('')
@@ -321,6 +338,10 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
     setConfluenceSpaces([])
     setSelectedJiraKey('')
     setSelectedConfluenceSpace('')
+    setOrgRepos([])
+    setSelectedOrgRepos(new Set())
+    setOrgImportProgress(null)
+    setOrgResults([])
   }
 
   const handleAddLocal = async () => {
@@ -361,6 +382,53 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
     } catch (err) {
       setAddRepoError(err instanceof Error ? err.message : 'Import thất bại')
     } finally {
+      setAddRepoLoading(false)
+    }
+  }
+
+  const handleFetchOrgRepos = async () => {
+    if (!addRepoUrl.trim() || !addRepoToken.trim()) return
+    setAddRepoLoading(true)
+    setAddRepoError('')
+    try {
+      const repos = await window.electronAPI.listOrgRepos(addRepoUrl.trim(), addRepoToken.trim())
+      const existingPaths = new Set((stats?.repos || []).map(r => r.source_path))
+      setOrgRepos(repos)
+      const notImported = repos.filter(r => !existingPaths.has(r.htmlUrl))
+      setSelectedOrgRepos(new Set(notImported.map(r => r.name)))
+    } catch (err) {
+      setAddRepoError(err instanceof Error ? err.message : 'Không thể tải danh sách repos')
+    } finally {
+      setAddRepoLoading(false)
+    }
+  }
+
+  const handleImportOrgRepos = async () => {
+    if (!projectId) return
+    const selected = orgRepos.filter(r => selectedOrgRepos.has(r.name))
+    if (selected.length === 0) return
+    setAddRepoLoading(true)
+    setAddRepoError('')
+
+    const cleanup = window.electronAPI.onOrgImportProgress?.((data) => {
+      setOrgImportProgress(data)
+    })
+
+    try {
+      const results = await window.electronAPI.importOrgRepos(projectId, selected, addRepoToken.trim())
+      setOrgResults(results)
+      await loadStats()
+      const failed = results.filter(r => r.status === 'error')
+      if (failed.length === 0) {
+        setAddRepoSuccess(`Đã import ${results.length} repos thành công`)
+        setTimeout(() => { resetAddRepo(); setAddRepoOpen(false) }, 2000)
+      } else {
+        setAddRepoError(`${failed.length}/${results.length} repos gặp lỗi`)
+      }
+    } catch (err) {
+      setAddRepoError(err instanceof Error ? err.message : 'Import thất bại')
+    } finally {
+      cleanup?.()
       setAddRepoLoading(false)
     }
   }
@@ -767,6 +835,70 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                 </section>
               )}
 
+              {throttleStatus.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Gauge size={16} className="text-[var(--accent-primary)]" />
+                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                      Embedding Rate Limits
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    {throttleStatus.map((t) => {
+                      const hasLimit = t.requestsPerDay > 0
+                      const dailyPercent = !hasLimit ? 0 : Math.min(100, (t.requestsToday / t.requestsPerDay) * 100)
+                      const recoveryHours = Math.ceil(t.recoveryTimeMs / 3_600_000)
+                      const recoveryMin = Math.ceil(t.recoveryTimeMs / 60_000)
+                      return (
+                        <div key={t.provider} className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] font-semibold text-[var(--text-primary)] uppercase">{t.provider}</span>
+                              {t.provider === 'github' && (
+                                <span className="px-1.5 py-0.5 text-[9px] rounded bg-[var(--accent-light)] text-[var(--accent-primary)]">Query/Search</span>
+                              )}
+                              {t.provider === 'voyage' && (
+                                <span className="px-1.5 py-0.5 text-[9px] rounded bg-blue-500/10 text-blue-500">Bulk Import</span>
+                              )}
+                              {t.provider === 'jina' && (
+                                <span className="px-1.5 py-0.5 text-[9px] rounded bg-purple-500/10 text-purple-500">Fallback</span>
+                              )}
+                            </div>
+                            {t.dailyQuotaExhausted ? (
+                              <span className="px-2 py-0.5 text-[10px] rounded-full bg-red-500/10 text-red-500 font-medium">
+                                Hết quota — hồi phục {recoveryHours > 1 ? `~${recoveryHours}h` : `~${recoveryMin}m`}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 text-[10px] rounded-full bg-green-500/10 text-green-500">Hoạt động</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-[var(--text-tertiary)]">
+                            <span>RPM: {t.rpmCurrent || t.rpmLastMinute}/{t.requestsPerMinute}</span>
+                            <span>Session: {t.totalRequestsSession}</span>
+                            {hasLimit ? (
+                              <span>Ngày: {t.requestsToday}/{t.requestsPerDay}</span>
+                            ) : (
+                              <span>Không giới hạn/ngày</span>
+                            )}
+                          </div>
+                          {hasLimit && (
+                            <div className="mt-2 w-full h-1.5 rounded-full bg-[var(--border-primary)] overflow-hidden">
+                              <div
+                                className={cn(
+                                  'h-full rounded-full transition-all duration-300',
+                                  t.dailyQuotaExhausted ? 'bg-red-500' : dailyPercent > 80 ? 'bg-yellow-500' : 'bg-[var(--accent-primary)]'
+                                )}
+                                style={{ width: `${dailyPercent}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
+
               {/* Atlassian Connections */}
               {stats.atlassianConnections.length > 0 && (
                 <section>
@@ -1002,6 +1134,14 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                           <span className="text-[12px] font-medium text-[var(--text-primary)]">GitHub</span>
                         </button>
                         <button
+                          onClick={() => setAddRepoType('github-org')}
+                          className="flex flex-col items-center gap-2 p-3 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-input)] hover:border-[var(--accent-primary)] hover:bg-[var(--accent-light)] transition-all col-span-2"
+                        >
+                          <Building size={18} className="text-[var(--text-secondary)]" />
+                          <span className="text-[12px] font-medium text-[var(--text-primary)]">GitHub Organization</span>
+                          <span className="text-[10px] text-[var(--text-tertiary)] -mt-1">Import nhiều repo cùng lúc</span>
+                        </button>
+                        <button
                           onClick={handleLoadJiraProjects}
                           className="flex flex-col items-center gap-2 p-3 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-input)] hover:border-[var(--accent-primary)] hover:bg-[var(--accent-light)] transition-all"
                         >
@@ -1053,7 +1193,135 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                       </div>
                     )}
 
-                    {/* Jira project picker */}
+                    {addRepoType === 'github-org' && !addRepoSuccess && (
+                      <div className="space-y-3">
+                        <Input
+                          placeholder="https://github.com/orgs/ORG_NAME"
+                          value={addRepoUrl}
+                          onChange={(e) => setAddRepoUrl(e.target.value)}
+                          autoFocus
+                        />
+                        <Input
+                          placeholder="GitHub Token (bắt buộc)"
+                          type="password"
+                          value={addRepoToken}
+                          onChange={(e) => setAddRepoToken(e.target.value)}
+                        />
+
+                        {orgRepos.length === 0 && (
+                          <div className="flex gap-2">
+                            <Button variant="secondary" size="sm" onClick={resetAddRepo}>
+                              Hủy
+                            </Button>
+                            <Button size="sm" onClick={handleFetchOrgRepos} disabled={addRepoLoading || !addRepoUrl.trim() || !addRepoToken.trim()}>
+                              {addRepoLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                              Tải danh sách repos
+                            </Button>
+                          </div>
+                        )}
+
+                        {orgRepos.length > 0 && (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-[var(--text-tertiary)]">
+                                {selectedOrgRepos.size}/{orgRepos.length} repos đã chọn
+                              </span>
+                              <button
+                                onClick={() => {
+                                  if (selectedOrgRepos.size === orgRepos.length) setSelectedOrgRepos(new Set())
+                                  else setSelectedOrgRepos(new Set(orgRepos.map(r => r.name)))
+                                }}
+                                className="text-[11px] text-[var(--accent-primary)] hover:underline"
+                              >
+                                {selectedOrgRepos.size === orgRepos.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                              </button>
+                            </div>
+                            <div className="max-h-[250px] overflow-y-auto border border-[var(--border-primary)] rounded-lg divide-y divide-[var(--border-primary)]">
+                              {orgRepos.map((repo) => {
+                                const alreadyImported = (stats?.repos || []).some(r => r.source_path === repo.cloneUrl)
+                                return (
+                                  <label
+                                    key={repo.name}
+                                    className={cn(
+                                      'flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors',
+                                      alreadyImported ? 'opacity-50 bg-[var(--bg-secondary)]' : 'hover:bg-[var(--bg-sidebar-hover)]'
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedOrgRepos.has(repo.name)}
+                                      onChange={() => {
+                                        setSelectedOrgRepos(prev => {
+                                          const next = new Set(prev)
+                                          if (next.has(repo.name)) next.delete(repo.name)
+                                          else next.add(repo.name)
+                                          return next
+                                        })
+                                      }}
+                                      disabled={alreadyImported}
+                                      className="rounded border-[var(--border-primary)] shrink-0"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[12px] font-medium text-[var(--text-primary)] truncate">{repo.name}</span>
+                                        {alreadyImported && (
+                                          <span className="px-1 py-0.5 text-[9px] rounded bg-green-500/10 text-green-500 shrink-0">Đã import</span>
+                                        )}
+                                        {repo.isPrivate && (
+                                          <span className="px-1 py-0.5 text-[9px] rounded bg-[var(--bg-secondary)] text-[var(--text-tertiary)] shrink-0">Private</span>
+                                        )}
+                                        {repo.language && (
+                                          <span className="px-1 py-0.5 text-[9px] rounded bg-[var(--accent-light)] text-[var(--accent-primary)] shrink-0">{repo.language}</span>
+                                        )}
+                                      </div>
+                                      {repo.description && (
+                                        <div className="text-[10px] text-[var(--text-tertiary)] truncate">{repo.description}</div>
+                                      )}
+                                    </div>
+                                  </label>
+                                )
+                              })}
+                            </div>
+
+                            {orgImportProgress && (
+                              <div className="space-y-1.5 px-2 py-2 rounded-lg bg-[var(--bg-secondary)]">
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-[var(--text-secondary)]">
+                                    {orgImportProgress.phase === 'complete' ? 'Hoàn tất!' : `${orgImportProgress.repoName} (${orgImportProgress.phase})`}
+                                  </span>
+                                  <span className="text-[var(--text-tertiary)]">{orgImportProgress.current}/{orgImportProgress.total}</span>
+                                </div>
+                                <div className="w-full h-1 rounded-full bg-[var(--border-primary)] overflow-hidden">
+                                  <div className="h-full rounded-full bg-[var(--accent-primary)] transition-all duration-300" style={{ width: `${(orgImportProgress.current / orgImportProgress.total) * 100}%` }} />
+                                </div>
+                              </div>
+                            )}
+
+                            {orgResults.length > 0 && (
+                              <div className="max-h-[100px] overflow-y-auto text-[11px] space-y-0.5">
+                                {orgResults.map((r) => (
+                                  <div key={r.name} className="flex items-center gap-1.5">
+                                    {r.status === 'ready' ? <Check size={11} className="text-green-500 shrink-0" /> : <X size={11} className="text-red-500 shrink-0" />}
+                                    <span className={r.status === 'ready' ? 'text-[var(--text-secondary)]' : 'text-[var(--status-error-text)]'}>
+                                      {r.name} {r.error ? `— ${r.error.slice(0, 50)}` : ''}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex gap-2">
+                              <Button variant="secondary" size="sm" onClick={resetAddRepo}>Hủy</Button>
+                              <Button size="sm" onClick={handleImportOrgRepos} disabled={addRepoLoading || selectedOrgRepos.size === 0}>
+                                {addRepoLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                                Import {selectedOrgRepos.size} repos
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     {addRepoType === 'jira' && !addRepoSuccess && jiraProjects.length > 0 && (
                       <div className="space-y-3">
                         <select

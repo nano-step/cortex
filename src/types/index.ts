@@ -2,7 +2,7 @@ export type ResponseMode = 'pm' | 'engineering'
 
 export type ModelStatus = 'ready' | 'quota_exhausted' | 'unavailable'
 
-export type ImportSourceType = 'local' | 'github'
+export type ImportSourceType = 'local' | 'github' | 'github-org'
 
 export type BrainStatus = 'idle' | 'indexing' | 'ready' | 'error'
 
@@ -338,6 +338,9 @@ declare global {
       getReposByProject: (projectId: string) => Promise<any[]>
       importGithubRepo: (projectId: string, repoUrl: string, token?: string, branch?: string) => Promise<{ success: boolean; repoId?: string; error?: string; needsToken?: boolean }>
       checkGithubAccess: (repoUrl: string, token?: string) => Promise<{ accessible: boolean; isPrivate?: boolean; error?: string }>
+      listOrgRepos: (orgUrl: string, token: string) => Promise<Array<{ name: string; fullName: string; htmlUrl: string; cloneUrl: string; language: string | null; isPrivate: boolean; description: string | null; defaultBranch: string }>>
+      importOrgRepos: (projectId: string, repos: Array<{ name: string; fullName: string; htmlUrl: string; cloneUrl: string; language: string | null; isPrivate: boolean; description: string | null; defaultBranch: string }>, token: string) => Promise<Array<{ name: string; repoId: string; status: string; error?: string }>>
+      onOrgImportProgress: (callback: (data: { projectId: string; current: number; total: number; repoName: string; phase: string }) => void) => () => void
       deleteRepo: (repoId: string) => Promise<{ success: boolean; error?: string }>
 
       // Brain search
@@ -420,6 +423,7 @@ declare global {
       getLLMConfig: () => Promise<{ maxTokens: number; contextMessages: number }>
       setLLMConfig: (maxTokens: number, contextMessages: number) => Promise<boolean>
       getEmbeddingConfig: () => Promise<{ mode: string; model: string; dimensions: number; url: string; hasApiKey: boolean }>
+      getEmbeddingThrottleStatus: () => Promise<Array<{ provider: string; rpmCurrent: number; rpmLastMinute: number; requestsPerMinute: number; requestsToday: number; requestsPerDay: number; totalRequestsSession: number; dailyQuotaExhausted: boolean; recoveryTimeMs: number }>>
       testEmbeddingConnection: () => Promise<{ success: boolean; dimensions?: number; latencyMs?: number; error?: string }>
       getQdrantConfig: () => Promise<{ url: string; apiKey: string }>
       setQdrantConfig: (url: string, apiKey: string) => Promise<boolean>
@@ -437,6 +441,8 @@ declare global {
       getVoyageModels: () => Promise<Array<{ id: string; name: string; dims: number; description: string }>>
       getSelectedVoyageModel: () => Promise<string>
       setSelectedVoyageModel: (modelId: string) => Promise<boolean>
+      getGitHubModelsEmbeddingEnabled: () => Promise<boolean>
+      setGitHubModelsEmbeddingEnabled: (enabled: boolean) => Promise<boolean>
       getOpenRouterConfig: () => Promise<{ apiKey: string; enabled: boolean; freeModels: unknown[] }>
       setOpenRouterApiKey: (key: string) => Promise<boolean>
       getPerplexityCookies: () => Promise<string>
