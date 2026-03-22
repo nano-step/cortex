@@ -31,6 +31,112 @@ export function closeDb(): void {
   }
 }
 
+interface Migration {
+  version: number
+  description: string
+  sql: string[]
+  disableForeignKeys?: boolean
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    description: 'Add branch columns',
+    sql: [
+      `ALTER TABLE repositories ADD COLUMN branch TEXT DEFAULT 'main'`,
+      `ALTER TABLE repositories ADD COLUMN active_branch TEXT NOT NULL DEFAULT 'main'`,
+      `ALTER TABLE chunks ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
+      `ALTER TABLE conversations ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
+      `ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+    ]
+  },
+  {
+    version: 2,
+    description: 'Rebuild repositories table with correct schema',
+    disableForeignKeys: true,
+    sql: [
+      `CREATE TABLE IF NOT EXISTS repositories_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        source_type TEXT NOT NULL CHECK(source_type IN ('local', 'github', 'jira', 'confluence')),
+        source_path TEXT NOT NULL,
+        branch TEXT DEFAULT 'main',
+        active_branch TEXT NOT NULL DEFAULT 'main',
+        last_indexed_sha TEXT,
+        last_indexed_at INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'indexing', 'ready', 'error')),
+        error_message TEXT,
+        total_files INTEGER DEFAULT 0,
+        total_chunks INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      )`,
+      `INSERT OR IGNORE INTO repositories_new SELECT * FROM repositories`,
+      `DROP TABLE IF EXISTS repositories`,
+      `ALTER TABLE repositories_new RENAME TO repositories`,
+    ]
+  },
+  {
+    version: 3,
+    description: 'Add branch index on chunks',
+    sql: [
+      `CREATE INDEX IF NOT EXISTS idx_chunks_branch ON chunks(branch)`,
+    ]
+  },
+]
+
+function runMigrations(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      description TEXT NOT NULL,
+      applied_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+  `)
+
+  const applied = new Set(
+    (database.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: number }>)
+      .map(r => r.version)
+  )
+
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.version)) continue
+
+    console.log(`[DB] Running migration v${migration.version}: ${migration.description}`)
+
+    if (migration.disableForeignKeys) {
+      database.pragma('foreign_keys = OFF')
+    }
+
+    try {
+      let allHarmless = true
+      for (const sql of migration.sql) {
+        try {
+          database.exec(sql)
+        } catch (stmtErr) {
+          const stmtMsg = (stmtErr as Error).message
+          const harmless = stmtMsg.includes('duplicate column') || stmtMsg.includes('already exists')
+          if (!harmless) {
+            allHarmless = false
+            throw stmtErr
+          }
+        }
+      }
+      database.prepare(
+        'INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (?, ?)'
+      ).run(migration.version, migration.description)
+      if (allHarmless) {
+        console.log(`[DB] Migration v${migration.version} completed (some statements skipped as already applied)`)
+      }
+    } catch (err) {
+      console.error(`[DB] Migration v${migration.version} FAILED:`, (err as Error).message)
+    } finally {
+      if (migration.disableForeignKeys) {
+        database.pragma('foreign_keys = ON')
+      }
+    }
+  }
+}
+
 function initSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -229,44 +335,7 @@ function initSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_variants_project ON prompt_variants(project_id);
   `)
 
-  // Migrations: add columns that may not exist in older databases
-  const migrations = [
-    `ALTER TABLE repositories ADD COLUMN branch TEXT DEFAULT 'main'`,
-    `ALTER TABLE repositories ADD COLUMN active_branch TEXT NOT NULL DEFAULT 'main'`,
-    `ALTER TABLE chunks ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
-    `ALTER TABLE conversations ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'`,
-    `ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
-    `CREATE TABLE IF NOT EXISTS repositories_new (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      source_type TEXT NOT NULL CHECK(source_type IN ('local', 'github', 'jira', 'confluence')),
-      source_path TEXT NOT NULL,
-      branch TEXT DEFAULT 'main',
-      active_branch TEXT NOT NULL DEFAULT 'main',
-      last_indexed_sha TEXT,
-      last_indexed_at INTEGER,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'indexing', 'ready', 'error')),
-      error_message TEXT,
-      total_files INTEGER DEFAULT 0,
-      total_chunks INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    )`,
-    `INSERT OR IGNORE INTO repositories_new SELECT * FROM repositories`,
-    `DROP TABLE IF EXISTS repositories`,
-    `ALTER TABLE repositories_new RENAME TO repositories`
-  ]
-  for (const sql of migrations) {
-    try {
-      database.exec(sql)
-    } catch {
-      // Column already exists — ignore
-    }
-  }
-
-  // Create indexes that depend on migrated columns
-  database.exec(`
-    CREATE INDEX IF NOT EXISTS idx_chunks_branch ON chunks(branch);
-  `)
+  runMigrations(database)
 }
 
 // --- CRUD helpers ---
