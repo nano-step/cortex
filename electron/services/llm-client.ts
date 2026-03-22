@@ -746,13 +746,16 @@ async function _streamWithModel(
 ): Promise<StreamResult> {
   console.log(`[LLM] Using model: ${model}`)
 
+  const isGpt5 = /gpt-5(?!\.\d)/.test(model) || model.includes('gpt-5-') || model.includes('gpt-5-codex')
   const body: Record<string, unknown> = {
     model,
     messages,
     stream: true,
     stream_options: { include_usage: true },
-    temperature: 0.3,
     max_tokens: 16384
+  }
+  if (!isGpt5) {
+    body.temperature = 0.3
   }
 
   if (tools && tools.length > 0) {
