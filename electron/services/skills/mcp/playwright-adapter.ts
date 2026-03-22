@@ -27,7 +27,7 @@ export function createPlaywrightSkill(): CortexSkill {
 
   return {
     name: 'playwright-browser',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'tool',
     priority: 'p2',
     description: 'Browser automation for web scraping, screenshots, and page interaction',

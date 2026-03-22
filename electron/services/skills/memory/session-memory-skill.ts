@@ -128,7 +128,7 @@ export function createSessionMemorySkill(): CortexSkill {
 
   return {
     name: 'session-memory',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'memory',
     priority: 'p1',
     description: 'Cross-session memory: stores and retrieves insights, patterns, and decisions learned from past conversations',

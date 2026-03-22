@@ -56,7 +56,7 @@ export function createApiContractSkill(): CortexSkill {
 
   return {
     name: 'api-contract',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p1',
     description: 'Validates API contracts between frontend and backend repos by analyzing endpoints and schemas',

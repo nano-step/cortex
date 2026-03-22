@@ -27,7 +27,7 @@ export function createCodeAnalysisSkill(): CortexSkill {
 
   return {
     name: 'code-analysis',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p0',
     description: 'Analyzes code architecture, dependencies, impact, and structure',

@@ -47,7 +47,7 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
   return {
     async connect(): Promise<void> {
       client = new Client(
-        { name: 'cortex', version: '2.0.0' },
+        { name: 'cortex', version: '4.0.0' },
         { capabilities: {} }
       )
 
@@ -88,7 +88,7 @@ export function createMCPClient(config: MCPClientConfig): MCPClient {
         } catch {
           if (client) { try { await client.close() } catch {} }
           client = new Client(
-            { name: 'cortex', version: '2.0.0' },
+            { name: 'cortex', version: '4.0.0' },
             { capabilities: {} }
           )
 

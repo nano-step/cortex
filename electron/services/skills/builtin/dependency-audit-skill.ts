@@ -52,7 +52,7 @@ export function createDependencyAuditSkill(): CortexSkill {
 
   return {
     name: 'dependency-audit',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p1',
     description: 'Audits project dependencies for outdated packages, known vulnerabilities, and license issues',

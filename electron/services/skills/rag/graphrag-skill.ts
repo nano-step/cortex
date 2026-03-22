@@ -14,7 +14,7 @@ export function createGraphRAGSkill(): CortexSkill {
 
   return {
     name: 'graphrag',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'rag',
     priority: 'p0',
     description: 'Graph-enhanced retrieval for relationship and dependency queries',

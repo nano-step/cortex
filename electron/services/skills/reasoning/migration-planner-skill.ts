@@ -55,7 +55,7 @@ export function createMigrationPlannerSkill(): CortexSkill {
 
   return {
     name: 'migration-planner',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'reasoning',
     priority: 'p1',
     description: 'Plans database migrations, API version migrations, and framework upgrades with rollback strategies',

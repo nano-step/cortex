@@ -49,7 +49,7 @@ export function createPerformanceProfilerSkill(): CortexSkill {
 
   return {
     name: 'performance-profiler',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'agent',
     priority: 'p1',
     description: 'Analyzes code for performance issues, optionally runs benchmarks, and suggests optimizations',

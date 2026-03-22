@@ -27,7 +27,7 @@ export function createMemorySkill(): CortexSkill {
 
   return {
     name: 'memory-recall',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'memory',
     priority: 'p0',
     description: 'Searches and retrieves memories from core, archival, and recall tiers',

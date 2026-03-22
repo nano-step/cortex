@@ -29,7 +29,7 @@ export function createChatSkill(): CortexSkill {
 
   return {
     name: 'cortex-chat',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'reasoning',
     priority: 'p0',
     description: 'Core conversation and reasoning skill. Fallback for all queries.',

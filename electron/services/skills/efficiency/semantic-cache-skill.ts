@@ -18,7 +18,7 @@ export function createSemanticCacheSkill(): CortexSkill {
 
   return {
     name: 'semantic-cache',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'efficiency',
     priority: 'p0',
     description: 'Semantic cache: intercepts queries and returns cached responses for semantically similar questions, saving tokens and latency',

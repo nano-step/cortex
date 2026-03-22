@@ -44,7 +44,7 @@ export function createTestGeneratorSkill(): CortexSkill {
 
   return {
     name: 'test-generator',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p0',
     description: 'Generates unit tests from code context using LLM analysis',

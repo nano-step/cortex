@@ -198,7 +198,7 @@ export function createPrReviewSkill(): CortexSkill {
 
   return {
     name: 'pr-code-reviewer',
-    version: '2.1.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p0',
     description: 'Deep PR/code review with 4 parallel perspectives (security, quality, performance, testing) and structured report generation',

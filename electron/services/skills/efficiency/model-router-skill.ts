@@ -55,7 +55,7 @@ export function createModelRouterSkill(): CortexSkill {
 
   return {
     name: 'model-router',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'efficiency',
     priority: 'p0',
     description: 'Model router: classifies query complexity and recommends optimal model for cost/quality balance',

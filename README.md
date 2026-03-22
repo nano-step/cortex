@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-3.2.0-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.0.0-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
@@ -225,9 +225,20 @@ Download the `.dmg` from [Releases](https://github.com/hoainho/cortex/releases),
 
 Follow the [Setup Guide](docs/SETUP_GUIDE.md) to configure your API keys.
 
+**Embedding setup (recommended):**
+
+| Provider | Purpose | How to get |
+|----------|---------|-----------|
+| **Voyage AI** (bulk) | Fast indexing — 1500 RPM, 200M free tokens | [voyageai.com](https://dash.voyageai.com/) → API Keys |
+| **GitHub Models** (query) | Free search/query — included with Copilot | [github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained PAT with `models:read` |
+
+Settings → Enter Voyage API Key + enable "GitHub Models Embedding" checkbox + enter GitHub PAT.
+
+Cortex uses **hybrid strategy**: Voyage handles bulk import (fast, high-limit), GitHub handles daily search/query (free, no cost).
+
 ### 3. Create a Project
 
-Import from local folder or GitHub URL. Cortex indexes the entire codebase.
+Import from local folder, GitHub URL, or **entire GitHub Organization** (bulk import). Cortex indexes the full codebase.
 
 ### 4. Start Using
 
@@ -259,7 +270,7 @@ npm run dev
 | Desktop | Electron 33 |
 | Frontend | React 18, TypeScript 5.7, Tailwind CSS 3.4, Zustand 5 |
 | Database | SQLite (better-sqlite3) + Qdrant (Docker) |
-| Embeddings | Voyage AI `voyage-3-large` (1024 dims) |
+| Embeddings | Voyage AI (bulk) + GitHub Models (query) — 1024 dims, hybrid strategy |
 | Code Parsing | Tree-sitter (web-tree-sitter) |
 | LLM | OpenAI-compatible API via proxy (multi-model routing) |
 | Tools | MCP Protocol, Playwright, Git CLI |

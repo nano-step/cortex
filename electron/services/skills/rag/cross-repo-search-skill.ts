@@ -90,7 +90,7 @@ export function createCrossRepoSearchSkill(): CortexSkill {
 
   return {
     name: 'cross-repo-search',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'rag',
     priority: 'p0',
     description: 'Multi-repo scoped search — searches each repo independently and merges results with repo context',

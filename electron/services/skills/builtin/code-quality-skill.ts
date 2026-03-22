@@ -187,7 +187,7 @@ export function createCodeQualitySkill(): CortexSkill {
 
   return {
     name: 'code-quality',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'code',
     priority: 'p1',
     description: 'Code quality analysis with complexity scoring, SOLID violation detection, tech debt identification, and A-F grading',

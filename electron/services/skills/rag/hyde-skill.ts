@@ -104,7 +104,7 @@ export function createHydeSkill(): CortexSkill {
 
   return {
     name: 'hyde-rag',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'rag',
     priority: 'p1',
     description: 'HyDE RAG: generates hypothetical code answer, embeds it, then searches for real code semantically similar to the ideal answer',

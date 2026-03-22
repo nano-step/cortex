@@ -41,7 +41,7 @@ export function createReActSkill(): CortexSkill {
 
   return {
     name: 'react-agent',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'reasoning',
     priority: 'p0',
     description: 'ReAct reasoning loop for multi-step problem solving',

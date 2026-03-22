@@ -47,7 +47,7 @@ export function createPlanExecuteSkill(): CortexSkill {
 
   return {
     name: 'plan-execute',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'reasoning',
     priority: 'p1',
     description: 'Two-phase reasoning: creates a plan then executes each step',

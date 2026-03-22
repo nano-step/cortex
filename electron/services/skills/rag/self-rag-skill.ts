@@ -72,7 +72,7 @@ export function createSelfRagSkill(): CortexSkill {
 
   return {
     name: 'self-rag',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'rag',
     priority: 'p1',
     description: 'Self-evaluating RAG: checks retrieval relevance before use, verifies response is supported by evidence, re-retrieves if needed',

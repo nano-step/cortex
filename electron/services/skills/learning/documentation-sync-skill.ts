@@ -51,7 +51,7 @@ export function createDocumentationSyncSkill(): CortexSkill {
 
   return {
     name: 'documentation-sync',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'learning',
     priority: 'p1',
     description: 'Detects stale documentation by comparing code with existing docs and generates update suggestions',

@@ -20,7 +20,7 @@ export function createSmartTrainerSkill(): CortexSkill {
 
   return {
     name: 'smart-trainer',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'learning',
     priority: 'p0',
     description: 'Real prompt optimization using behavioral feedback analysis, LLM-driven rewriting, few-shot selection, and A/B testing',

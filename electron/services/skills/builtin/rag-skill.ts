@@ -26,7 +26,7 @@ export function createRagSkill(): CortexSkill {
 
   return {
     name: 'rag-search',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'rag',
     priority: 'p0',
     description: 'Intelligent code search using agentic RAG pipeline with query decomposition and iterative retrieval',

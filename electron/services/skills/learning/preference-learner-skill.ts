@@ -68,7 +68,7 @@ export function createPreferenceLearnerSkill(): CortexSkill {
 
   return {
     name: 'preference-learner',
-    version: '2.0.0',
+    version: '4.0.0',
     category: 'learning',
     priority: 'p1',
     description: 'Learns coding style, naming conventions, response format, and language preferences from user behavior and conversation patterns',

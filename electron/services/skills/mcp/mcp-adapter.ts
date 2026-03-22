@@ -27,7 +27,7 @@ export function createMCPSkill(client: MCPClient, tool: MCPTool): CortexSkill {
 
   return {
     name: `mcp-${tool.name}`,
-    version: '1.0.0',
+    version: '4.0.0',
     category: 'tool',
     priority: 'p1',
     description: tool.description || `MCP tool: ${tool.name}`,
