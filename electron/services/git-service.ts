@@ -93,7 +93,13 @@ export async function cloneRepository(
     }
   }
 
-  // Get latest commit SHA
+  // Strip token from stored remote URL (security: don't persist credentials in git config)
+  if (token) {
+    try {
+      await execFileAsync('git', ['remote', 'set-url', 'origin', repoUrl], { cwd: targetDir })
+    } catch { /* non-fatal */ }
+  }
+
   const { stdout: sha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
     cwd: targetDir
   })
@@ -167,28 +173,12 @@ export async function pullLatest(
   localPath: string,
   token?: string
 ): Promise<{ newSha: string; changed: boolean }> {
-  // Set credential if token provided
-  if (token) {
-    const remoteUrl = await getRemoteUrl(localPath)
-    if (remoteUrl) {
-      const url = new URL(remoteUrl)
-      url.username = 'x-access-token'
-      url.password = token
-      await execFileAsync('git', ['remote', 'set-url', 'origin', url.toString()], {
-        cwd: localPath
-      })
-    }
-  }
-
   const oldSha = await getLatestSha(localPath)
 
-  await execFileAsync('git', ['pull', '--ff-only'], {
+  await execFileAsync('git', [...buildAuthArgs(token), 'pull', '--ff-only'], {
     cwd: localPath,
     timeout: 60000,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: '0'
-    }
+    env: { ...process.env, ...GIT_ENV }
   })
 
   const newSha = await getLatestSha(localPath)
@@ -264,6 +254,75 @@ export async function checkRepoAccess(
 }
 
 // ==================
+// Organization Repos
+// ==================
+
+export interface OrgRepo {
+  name: string
+  fullName: string
+  htmlUrl: string
+  cloneUrl: string
+  language: string | null
+  isPrivate: boolean
+  description: string | null
+  defaultBranch: string
+}
+
+export async function listOrgRepos(orgName: string, token: string): Promise<OrgRepo[]> {
+  const allRepos: OrgRepo[] = []
+  let page = 1
+
+  while (true) {
+    const response = await fetch(
+      `https://api.github.com/orgs/${encodeURIComponent(orgName)}/repos?per_page=100&page=${page}&type=all`,
+      {
+        headers: {
+          Accept: 'application/vnd.github.v3+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Cortex-App'
+        }
+      }
+    )
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new Error(`GitHub API error ${response.status}: ${body.slice(0, 200)}`)
+    }
+
+    const repos = await response.json() as Array<{
+      name: string
+      full_name: string
+      html_url: string
+      clone_url: string
+      language: string | null
+      private: boolean
+      description: string | null
+      default_branch: string
+    }>
+
+    if (repos.length === 0) break
+
+    for (const r of repos) {
+      allRepos.push({
+        name: r.name,
+        fullName: r.full_name,
+        htmlUrl: r.html_url,
+        cloneUrl: r.clone_url,
+        language: r.language,
+        isPrivate: r.private,
+        description: r.description,
+        defaultBranch: r.default_branch
+      })
+    }
+
+    if (repos.length < 100) break
+    page++
+  }
+
+  return allRepos
+}
+
+// ==================
 // Token Management
 // ==================
 
@@ -310,6 +369,24 @@ export function deleteGitHubToken(tokenId: string): void {
   db.prepare('DELETE FROM github_tokens WHERE id = ?').run(tokenId)
 }
 
+function buildAuthArgs(token?: string): string[] {
+  if (!token) return []
+  return [
+    '-c', 'credential.helper=',
+    '-c', `url.https://x-access-token:${token}@github.com/.insteadOf=https://github.com/`
+  ]
+}
+
+const GIT_ENV: Record<string, string> = { GIT_TERMINAL_PROMPT: '0' }
+
+async function gitFetchWithAuth(localPath: string, token?: string): Promise<void> {
+  await execFileAsync('git', [...buildAuthArgs(token), 'fetch', '--all', '--prune'], {
+    cwd: localPath,
+    timeout: 30000,
+    env: { ...process.env, ...GIT_ENV }
+  })
+}
+
 // ==================
 // Branch Management
 // ==================
@@ -320,51 +397,49 @@ export function deleteGitHubToken(tokenId: string): void {
  */
 export async function listBranches(localPath: string, token?: string): Promise<string[]> {
   try {
-    // Set auth on remote URL if token provided (needed for private repos)
-    if (token) {
-      try {
-        const { stdout: remoteUrl } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: localPath })
-        const url = new URL(remoteUrl.trim())
-        url.username = 'x-access-token'
-        url.password = token
-        await execFileAsync('git', ['remote', 'set-url', 'origin', url.toString()], { cwd: localPath })
-      } catch {
-        // non-fatal: proceed without auth
-      }
-    }
-
-    // Fetch latest remote refs (non-fatal: if network fails, use cached refs)
     try {
-      await execFileAsync('git', ['fetch', '--all', '--prune'], {
-        cwd: localPath,
-        timeout: 30000,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-      })
+      await gitFetchWithAuth(localPath, token)
     } catch (fetchErr) {
-      console.warn('Branch fetch failed (using cached refs):', (fetchErr as Error).message)
+      console.warn('[Git] Branch fetch failed (using cached refs):', (fetchErr as Error).message?.split('\n')[0])
     }
 
     // List remote branches from local refs (works even if fetch failed)
-    const { stdout } = await execFileAsync('git', [
-      'branch', '-r', '--format=%(refname:short)'
-    ], { cwd: localPath })
-
-    const branches = stdout
-      .split('\n')
-      .map(b => b.trim())
-      .filter(b => b && !b.includes('HEAD'))
-      .map(b => b.replace(/^origin\//, ''))
-      .filter((v, i, a) => a.indexOf(v) === i) // deduplicate
-
-    // If no remote branches found, also check local branches as fallback
-    if (branches.length === 0) {
-      const { stdout: localBranches } = await execFileAsync('git', [
-        'branch', '--format=%(refname:short)'
+    let branches: string[] = []
+    try {
+      const { stdout } = await execFileAsync('git', [
+        'branch', '-r', '--format=%(refname:short)'
       ], { cwd: localPath })
-      return localBranches
+
+      branches = stdout
         .split('\n')
         .map(b => b.trim())
-        .filter(Boolean)
+        .filter(b => b && !b.includes('HEAD'))
+        .map(b => b.replace(/^origin\//, ''))
+        .filter((v, i, a) => a.indexOf(v) === i)
+    } catch (branchErr) {
+      console.warn('[Git] Remote branch listing failed, falling back to local:', (branchErr as Error).message?.split('\n')[0])
+    }
+
+    // Fallback: check local branches if remote listing failed or returned nothing
+    if (branches.length === 0) {
+      try {
+        const { stdout: localBranches } = await execFileAsync('git', [
+          'branch', '--format=%(refname:short)'
+        ], { cwd: localPath })
+        branches = localBranches
+          .split('\n')
+          .map(b => b.trim())
+          .filter(Boolean)
+      } catch {
+        // Last resort: try rev-parse to at least get current branch
+        try {
+          const { stdout: currentBranch } = await execFileAsync('git', [
+            'rev-parse', '--abbrev-ref', 'HEAD'
+          ], { cwd: localPath })
+          const name = currentBranch.trim()
+          if (name && name !== 'HEAD') branches = [name]
+        } catch { /* truly broken repo */ }
+      }
     }
 
     return branches
@@ -379,34 +454,21 @@ export async function listBranches(localPath: string, token?: string): Promise<s
  */
 export async function switchBranch(
   localPath: string,
-  branch: string
+  branch: string,
+  token?: string
 ): Promise<{ sha: string }> {
-  // Try direct checkout first
+  const authArgs = buildAuthArgs(token)
+  const env = { ...process.env, ...GIT_ENV }
+
   try {
-    await execFileAsync('git', ['checkout', branch], {
-      cwd: localPath,
-      timeout: 30000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-    })
+    await execFileAsync('git', [...authArgs, 'checkout', branch], { cwd: localPath, timeout: 30000, env })
   } catch {
-    // If branch doesn't exist locally, create tracking branch
-    await execFileAsync('git', ['checkout', '-b', branch, `origin/${branch}`], {
-      cwd: localPath,
-      timeout: 30000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-    })
+    await execFileAsync('git', [...authArgs, 'checkout', '-b', branch, `origin/${branch}`], { cwd: localPath, timeout: 30000, env })
   }
 
-  // Pull latest for this branch
   try {
-    await execFileAsync('git', ['pull', '--ff-only'], {
-      cwd: localPath,
-      timeout: 60000,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
-    })
-  } catch {
-    // Non-fatal: may be up to date
-  }
+    await execFileAsync('git', [...authArgs, 'pull', '--ff-only'], { cwd: localPath, timeout: 60000, env })
+  } catch { /* non-fatal: may be up to date */ }
 
   const sha = await getLatestSha(localPath)
   return { sha }
