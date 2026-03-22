@@ -6,7 +6,7 @@
  * Uses Basic Auth (email:apiToken) for authentication.
  *
  * Endpoints:
- * - POST /rest/api/3/search (JQL search for issues)
+ * - POST /rest/api/3/search/jql (JQL search for issues)
  * - GET /rest/agile/1.0/board (list boards)
  * - GET /rest/agile/1.0/board/{boardId}/sprint (list sprints)
  * - GET /rest/api/3/issue/{issueKey} (single issue with comments)
@@ -76,10 +76,9 @@ export interface JiraConnectionConfig {
 }
 
 interface JiraSearchResponse {
-  startAt: number
-  maxResults: number
   total: number
   issues: any[]
+  nextPageToken?: string
 }
 
 // ============================
@@ -239,26 +238,29 @@ export async function fetchIssuesByJQL(
   onProgress?: (fetched: number, total: number) => void
 ): Promise<JiraIssue[]> {
   const allIssues: JiraIssue[] = []
-  let startAt = 0
-  const maxResults = 50 // Jira Cloud default max is 100, using 50 for stability
+  let nextPageToken: string | undefined
+  const maxResults = 50
 
   const fields = [
     'summary', 'description', 'status', 'assignee', 'reporter',
     'priority', 'labels', 'issuetype', 'comment', 'created', 'updated',
-    'resolution', 'customfield_10016', // story points (common field)
-    'sprint', 'parent' // for epic link
-  ].join(',')
+    'resolution', 'customfield_10016',
+    'sprint', 'parent'
+  ]
 
   while (true) {
-    const data: JiraSearchResponse = await jiraFetch(config, '/rest/api/3/search', {
+    const reqBody: Record<string, unknown> = {
+      jql,
+      maxResults,
+      fields,
+    }
+    if (nextPageToken) {
+      reqBody.nextPageToken = nextPageToken
+    }
+
+    const data: JiraSearchResponse = await jiraFetch(config, '/rest/api/3/search/jql', {
       method: 'POST',
-      body: {
-        jql,
-        startAt,
-        maxResults,
-        fields: fields.split(','),
-        expand: ['names']
-      }
+      body: reqBody
     })
 
     for (const issue of data.issues) {
@@ -267,10 +269,9 @@ export async function fetchIssuesByJQL(
 
     onProgress?.(allIssues.length, data.total)
 
-    if (allIssues.length >= data.total || data.issues.length === 0) break
-    startAt += data.issues.length
+    if (!data.nextPageToken || data.issues.length === 0) break
+    nextPageToken = data.nextPageToken
 
-    // Small delay to avoid rate limits
     await sleep(100)
   }
 
