@@ -62,19 +62,11 @@ export interface StreamResult {
 
 /** Model quality tiers — higher = better. Models matched by prefix. */
 const MODEL_RANKING: Array<{ pattern: string; tier: number }> = [
-  // Tier 10: GitLab models (highest priority)
-  { pattern: 'gitlab-opus', tier: 10 },
-  { pattern: 'gitlab-sonnet-4-6', tier: 10 },
-  { pattern: 'gitlab-gpt-5-3-codex', tier: 10 },
-  { pattern: 'gitlab-gpt-5-2', tier: 10 },
-  { pattern: 'gitlab-gpt-5-codex', tier: 10 },
-  { pattern: 'gitlab-codex', tier: 10 },
-  { pattern: 'gitlab-gpt-5-1', tier: 10 },
-  { pattern: 'gitlab-sonnet', tier: 10 },
-  { pattern: 'gitlab-gpt-5-mini', tier: 10 },
-  { pattern: 'gitlab-haiku', tier: 10 },
+  // Tier 10: GitLab / Duo models (highest priority)
+  { pattern: 'gitlab/', tier: 10 },
   { pattern: 'gitlab-', tier: 10 },
-  { pattern: 'duo-chat', tier: 10 },
+  { pattern: 'duo-', tier: 10 },
+  { pattern: 'dou-', tier: 10 },
 
   // Tier 9: Frontier models
   { pattern: 'gpt-5.2-codex', tier: 9 },
@@ -143,12 +135,13 @@ const serverErrorModels = new Set<string>()
  * Get the tier for a model ID based on pattern matching
  */
 function getModelTier(modelId: string): number {
+  const lower = modelId.toLowerCase()
   for (const entry of MODEL_RANKING) {
-    if (modelId.startsWith(entry.pattern) || modelId === entry.pattern) {
+    if (lower.startsWith(entry.pattern) || lower.includes('/' + entry.pattern)) {
       return entry.tier
     }
   }
-  return 1 // Unknown models get lowest tier
+  return 1
 }
 
 /**
@@ -571,7 +564,8 @@ export function buildPrompt(
   systemContent += `\n\n=== TOOL INSTRUCTIONS (MANDATORY) ===
 You have access to tools. When the user asks you to DO something (generate images, search code, analyze files), you MUST call the appropriate tool. NEVER say "I can't" or "I don't have the ability" if a matching tool exists in your tool list.
 Specifically:
-- Requests to draw/generate/create images → call cortex_generate_image
+- Requests to draw/generate/create images (ảnh, picture, illustration) → call cortex_generate_image
+- Requests about architecture, diagrams, sơ đồ, relationships → DO NOT generate image. Respond with Mermaid diagrams or structured text analysis
 - Requests to analyze/describe images → call cortex_analyze_image
 - Requests about team/contributors → call cortex_git_contributors
 - Requests to find code/config → call cortex_grep_search or cortex_search_config

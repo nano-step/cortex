@@ -66,7 +66,7 @@ function MermaidBlock({ code }: { code: string }) {
   return (
     <div
       ref={containerRef}
-      className="my-3 flex justify-center [&_svg]:max-w-full"
+      className="my-3 overflow-x-auto rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-primary)] p-4 [&_svg]:w-full [&_svg]:h-auto [&_svg]:min-h-[200px] [&_svg]:max-h-[600px]"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
