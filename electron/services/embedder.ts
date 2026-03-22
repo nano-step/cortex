@@ -8,13 +8,16 @@
 
 import { getDb, chunkQueries } from './db'
 import { BrowserWindow } from 'electron'
-import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getEmbeddingProvider, getSetting, setSetting } from './settings-service'
+import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getGitHubPAT, getEmbeddingProvider, getBulkEmbeddingProvider, getSetting, setSetting } from './settings-service'
+import type { EmbeddingProviderType } from './settings-service'
 
 export const EMBEDDING_DIMENSIONS = 1024
 export const LEGACY_EMBEDDING_DIMENSIONS = 384
 
 const VOYAGE_API_URL = 'https://api.voyageai.com/v1/embeddings'
 const JINA_API_URL = 'https://api.jina.ai/v1/embeddings'
+const GITHUB_MODELS_API_URL = 'https://models.github.ai/inference/embeddings'
+const GITHUB_MODELS_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
 const JINA_MODEL = 'jina-embeddings-v3'
 
 export const VOYAGE_MODELS = [
@@ -40,54 +43,115 @@ function getVoyageModelDims(): number {
   return model?.dims || 1024
 }
 
-const BATCH_SIZE = 8
 const MAX_TEXT_LENGTH = 8192
 const MAX_RETRIES = 3
+const MAX_RETRY_AFTER_SECONDS = 120
 
-// Token-based throttle: 80K tokens/min (safe margin under 100K limit)
-const TOKEN_LIMIT_PER_MINUTE = 80_000
-const TOKEN_WINDOW_MS = 60_000
-const MIN_BATCH_INTERVAL_MS = 2_000
-
-interface TokenBucket {
-  tokens: number
-  windowStart: number
+interface ProviderLimits {
+  batchSize: number
+  tokenLimitPerMinute: number
+  requestsPerMinute: number
+  requestsPerDay: number
+  minBatchIntervalMs: number
 }
 
-const tokenBucket: TokenBucket = { tokens: 0, windowStart: Date.now() }
+// Source: https://docs.voyageai.com/docs/rate-limits (Tier 1)
+//   voyage-4: 3M TPM, 2000 RPM. No daily limit.
+// Source: https://docs.github.com/en/github-models/prototyping-with-ai-models (Copilot Free/Pro)
+//   text-embedding-3-small: 15 RPM, 150 RPD, 64K tokens/request. No TPM limit.
+// Source: https://docs.jina.ai (Free tier)
+//   jina-embeddings-v3: 500 RPM, ~1M TPM
+const PROVIDER_LIMITS: Record<string, ProviderLimits> = {
+  voyage: { batchSize: 8, tokenLimitPerMinute: 2_000_000, requestsPerMinute: 1500, requestsPerDay: Infinity, minBatchIntervalMs: 50 },
+  jina:   { batchSize: 8, tokenLimitPerMinute: 500_000,   requestsPerMinute: 400,  requestsPerDay: Infinity, minBatchIntervalMs: 200 },
+  github: { batchSize: 48, tokenLimitPerMinute: Infinity,  requestsPerMinute: 14,   requestsPerDay: 145,      minBatchIntervalMs: 4_500 },
+  proxy:  { batchSize: 8, tokenLimitPerMinute: 500_000,   requestsPerMinute: 300,  requestsPerDay: Infinity, minBatchIntervalMs: 200 },
+}
+
+function getLimits(provider?: EmbeddingProviderType): ProviderLimits {
+  return PROVIDER_LIMITS[provider || getEmbeddingProvider()] || PROVIDER_LIMITS.proxy
+}
+
+function getBatchSize(provider?: EmbeddingProviderType): number {
+  return getLimits(provider).batchSize
+}
+
+interface ThrottleState {
+  tokensUsed: number
+  tokenWindowStart: number
+  requestsThisMinute: number
+  requestsLastMinute: number
+  minuteWindowStart: number
+  requestsToday: number
+  dayWindowStart: number
+  totalRequestsSession: number
+}
+
+const providerThrottles: Record<string, ThrottleState> = {}
+
+function getThrottle(provider: string): ThrottleState {
+  if (!providerThrottles[provider]) {
+    providerThrottles[provider] = {
+      tokensUsed: 0, tokenWindowStart: Date.now(),
+      requestsThisMinute: 0, requestsLastMinute: 0, minuteWindowStart: Date.now(),
+      requestsToday: 0, dayWindowStart: Date.now(),
+      totalRequestsSession: 0,
+    }
+  }
+  return providerThrottles[provider]
+}
 
 function estimateTokens(texts: string[]): number {
   return texts.reduce((sum, t) => sum + Math.ceil(t.length / 4), 0)
 }
 
-function canSendTokens(count: number): boolean {
+function resetWindowIfExpired(t: ThrottleState): void {
   const now = Date.now()
-  if (now - tokenBucket.windowStart >= TOKEN_WINDOW_MS) {
-    tokenBucket.tokens = 0
-    tokenBucket.windowStart = now
+  if (now - t.tokenWindowStart >= 60_000) { t.tokensUsed = 0; t.tokenWindowStart = now }
+  if (now - t.minuteWindowStart >= 60_000) {
+    t.requestsLastMinute = t.requestsThisMinute
+    t.requestsThisMinute = 0
+    t.minuteWindowStart = now
   }
-  return tokenBucket.tokens + count <= TOKEN_LIMIT_PER_MINUTE
+  if (now - t.dayWindowStart >= 86_400_000) { t.requestsToday = 0; t.dayWindowStart = now }
 }
 
-function recordTokens(count: number): void {
-  const now = Date.now()
-  if (now - tokenBucket.windowStart >= TOKEN_WINDOW_MS) {
-    tokenBucket.tokens = 0
-    tokenBucket.windowStart = now
-  }
-  tokenBucket.tokens += count
+function canSend(provider: string, tokenCount: number): { ok: boolean; reason?: string } {
+  const t = getThrottle(provider)
+  resetWindowIfExpired(t)
+  const limits = getLimits(provider as EmbeddingProviderType)
+  if (t.requestsToday >= limits.requestsPerDay) return { ok: false, reason: 'daily limit' }
+  if (t.requestsThisMinute >= limits.requestsPerMinute) return { ok: false, reason: 'RPM limit' }
+  if (limits.tokenLimitPerMinute !== Infinity && t.tokensUsed + tokenCount > limits.tokenLimitPerMinute) return { ok: false, reason: 'token limit' }
+  return { ok: true }
 }
 
-async function waitForTokenBudget(needed: number): Promise<void> {
-  while (!canSendTokens(needed)) {
-    const remaining = TOKEN_WINDOW_MS - (Date.now() - tokenBucket.windowStart)
-    const waitMs = Math.min(remaining + 500, 30_000)
-    console.log(`[Embedder] Throttle: ${tokenBucket.tokens}/${TOKEN_LIMIT_PER_MINUTE} tokens used, waiting ${Math.round(waitMs / 1000)}s`)
-    await new Promise(r => setTimeout(r, waitMs))
-    if (Date.now() - tokenBucket.windowStart >= TOKEN_WINDOW_MS) {
-      tokenBucket.tokens = 0
-      tokenBucket.windowStart = Date.now()
+function recordRequest(provider: string, tokenCount: number): void {
+  const t = getThrottle(provider)
+  resetWindowIfExpired(t)
+  t.tokensUsed += tokenCount
+  t.requestsThisMinute++
+  t.requestsToday++
+  t.totalRequestsSession++
+}
+
+async function waitForBudget(provider: string, tokenCount: number): Promise<void> {
+  const limits = getLimits(provider as EmbeddingProviderType)
+  const t = getThrottle(provider)
+  let check = canSend(provider, tokenCount)
+  while (!check.ok) {
+    if (check.reason === 'daily limit') {
+      const remaining = 86_400_000 - (Date.now() - t.dayWindowStart)
+      const hours = Math.ceil(remaining / 3_600_000)
+      console.warn(`[Embedder] ${provider} daily limit reached (${limits.requestsPerDay}/day). Re-sync in ~${hours}h.`)
+      throw new Error(`DAILY_QUOTA_EXHAUSTED: ${provider} daily limit reached. Re-sync later (~${hours}h).`)
     }
+    const remaining = 60_000 - (Date.now() - t.minuteWindowStart)
+    const waitMs = Math.min(remaining + 500, 30_000)
+    console.log(`[Embedder] Throttle [${provider}]: ${check.reason} (${t.requestsThisMinute}/${limits.requestsPerMinute} RPM, ${t.tokensUsed}/${limits.tokenLimitPerMinute === Infinity ? '∞' : limits.tokenLimitPerMinute} tokens), waiting ${Math.round(waitMs / 1000)}s`)
+    await new Promise(r => setTimeout(r, waitMs))
+    resetWindowIfExpired(t)
+    check = canSend(provider, tokenCount)
   }
 }
 
@@ -97,6 +161,7 @@ interface QueueItem {
   reject: (e: Error) => void
   texts: string[]
   task?: 'retrieval.passage' | 'retrieval.query'
+  providerOverride?: EmbeddingProviderType
 }
 
 let requestQueue: QueueItem[] = []
@@ -115,32 +180,45 @@ async function processQueue(): Promise<void> {
 
   while (requestQueue.length > 0) {
     const item = requestQueue.shift()!
+    const itemProvider = item.providerOverride || getEmbeddingProvider()
+    const itemLimits = getLimits(itemProvider)
     const tokenEstimate = estimateTokens(item.texts)
 
-    await waitForTokenBudget(tokenEstimate)
+    try {
+      await waitForBudget(itemProvider, tokenEstimate)
+    } catch (limitErr) {
+      item.reject(limitErr as Error)
+      drainQueueWithError((limitErr as Error).message)
+      break
+    }
 
     const now = Date.now()
     const elapsed = now - lastRequestTime
-    if (elapsed < MIN_BATCH_INTERVAL_MS) {
-      await new Promise(r => setTimeout(r, MIN_BATCH_INTERVAL_MS - elapsed))
+    if (elapsed < itemLimits.minBatchIntervalMs) {
+      await new Promise(r => setTimeout(r, itemLimits.minBatchIntervalMs - elapsed))
     }
 
     try {
       lastRequestTime = Date.now()
-      const result = await embedTextsRaw(item.texts, item.task || 'retrieval.passage')
-      recordTokens(tokenEstimate)
+      const result = await embedTextsRaw(item.texts, item.task || 'retrieval.passage', itemProvider)
+      recordRequest(itemProvider, tokenEstimate)
       item.resolve(result)
     } catch (err) {
-      const is429 = err instanceof Error && err.message.includes('429')
+      const errMsg = err instanceof Error ? err.message : ''
+      if (errMsg.includes('DAILY_QUOTA_EXHAUSTED')) {
+        item.reject(err as Error)
+        drainQueueWithError(errMsg)
+        break
+      }
+      const is429 = errMsg.includes('429')
       if (is429) {
-        // On 429, wait full minute then retry this item
-        console.warn(`[Embedder] Rate limited (429), waiting 60s before retry`)
-        tokenBucket.tokens = TOKEN_LIMIT_PER_MINUTE
-        tokenBucket.windowStart = Date.now()
+        const t = getThrottle(itemProvider)
+        console.warn(`[Embedder] ${itemProvider} rate limited (429), pausing 60s before retry`)
+        t.requestsThisMinute = itemLimits.requestsPerMinute
+        t.minuteWindowStart = Date.now()
         requestQueue.unshift(item)
         await new Promise(r => setTimeout(r, 60_000))
-        tokenBucket.tokens = 0
-        tokenBucket.windowStart = Date.now()
+        resetWindowIfExpired(t)
         continue
       }
       item.reject(err as Error)
@@ -166,9 +244,9 @@ function sendModelDownloadProgress(data: { model: string; status: string; progre
   }
 }
 
-async function embedTexts(texts: string[]): Promise<number[][]> {
+async function embedTexts(texts: string[], providerOverride?: EmbeddingProviderType): Promise<number[][]> {
   return new Promise((resolve, reject) => {
-    requestQueue.push({ resolve, reject, texts })
+    requestQueue.push({ resolve, reject, texts, providerOverride })
     processQueue()
   })
 }
@@ -182,9 +260,10 @@ async function embedTextsForQuery(texts: string[]): Promise<number[][]> {
 
 async function embedTextsRaw(
   texts: string[],
-  task: 'retrieval.passage' | 'retrieval.query' = 'retrieval.passage'
+  task: 'retrieval.passage' | 'retrieval.query' = 'retrieval.passage',
+  providerOverride?: EmbeddingProviderType
 ): Promise<number[][]> {
-  const provider = getEmbeddingProvider()
+  const provider = providerOverride || getEmbeddingProvider()
   const truncated = texts.map(truncateText)
 
   let baseUrl: string
@@ -213,6 +292,17 @@ async function embedTextsRaw(
       }
       break
     }
+    case 'github': {
+      baseUrl = GITHUB_MODELS_API_URL
+      apiKey = getGitHubPAT()!
+      reqBody = {
+        model: GITHUB_MODELS_EMBEDDING_MODEL,
+        input: truncated,
+        dimensions: EMBEDDING_DIMENSIONS,
+        encoding_format: 'float'
+      }
+      break
+    }
     default: {
       baseUrl = `${getProxyUrl()}/v1/embeddings`
       apiKey = getProxyKey()
@@ -236,11 +326,22 @@ async function embedTextsRaw(
       signal: AbortSignal.timeout(30000)
     })
 
-    if (response.status === 429 && attempt < MAX_RETRIES) {
-      const retryAfter = Number(response.headers.get('retry-after')) || (2 ** attempt * 10)
-      console.warn(`[Embedder] ${provider} rate limited (429), retry in ${retryAfter}s (${attempt + 1}/${MAX_RETRIES})`)
-      await new Promise(r => setTimeout(r, retryAfter * 1000))
-      continue
+    if (response.status === 429) {
+      const rateLimitType = response.headers.get('x-ratelimit-type') || ''
+      const rawRetryAfter = Number(response.headers.get('retry-after')) || (2 ** attempt * 10)
+
+      if (rateLimitType.includes('ByDay') || rawRetryAfter > 3600) {
+        const hours = Math.ceil(rawRetryAfter / 3600)
+        console.error(`[Embedder] ${provider} DAILY QUOTA EXHAUSTED (${rateLimitType}, reset in ~${hours}h). Stopping embedding.`)
+        throw new Error(`DAILY_QUOTA_EXHAUSTED: ${provider} daily limit reached. Re-sync later to continue (~${hours}h).`)
+      }
+
+      if (attempt < MAX_RETRIES) {
+        const retryAfter = Math.min(rawRetryAfter, MAX_RETRY_AFTER_SECONDS)
+        console.warn(`[Embedder] ${provider} rate limited (429), retry in ${retryAfter}s (${attempt + 1}/${MAX_RETRIES})`)
+        await new Promise(r => setTimeout(r, retryAfter * 1000))
+        continue
+      }
     }
 
     if (response.status === 403) {
@@ -296,17 +397,22 @@ export async function embedProjectChunks(
 
   if (chunks.length === 0) return 0
 
-  const provider = getEmbeddingProvider()
-  console.log(`[Embedder] Starting batch embed: ${chunks.length} chunks via ${provider} (batch=${BATCH_SIZE})`)
+  const bulkProvider = getBulkEmbeddingProvider()
+  const queryProvider = getEmbeddingProvider()
+  const batchSize = getBatchSize(bulkProvider)
+  if (bulkProvider !== queryProvider) {
+    console.log(`[Embedder] Strategy: bulk=${bulkProvider} (fast), query=${queryProvider} (default)`)
+  }
+  console.log(`[Embedder] Starting batch embed: ${chunks.length} chunks via ${bulkProvider} (batch=${batchSize})`)
 
-  await preloadEmbeddingModel()
+  await preloadEmbeddingModel(bulkProvider)
 
   const updateEmbedding = chunkQueries.updateEmbedding(db)
   let processed = 0
   let failed = 0
 
-  for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-    const batch = chunks.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const batch = chunks.slice(i, i + batchSize)
 
     const texts = batch.map((chunk) => {
       const prefix = [
@@ -326,7 +432,7 @@ export async function embedProjectChunks(
     })
 
     try {
-      const embeddings = await embedTexts(texts)
+      const embeddings = await embedTexts(texts, bulkProvider)
 
       const transaction = db.transaction(() => {
         for (let j = 0; j < batch.length; j++) {
@@ -342,8 +448,14 @@ export async function embedProjectChunks(
       processed += batch.length
       onProgress?.(processed, chunks.length)
     } catch (err) {
+      const errMsg = (err as Error).message || ''
+      if (errMsg.includes('DAILY_QUOTA_EXHAUSTED') || errMsg.includes('Daily embedding limit')) {
+        const remaining = chunks.length - processed
+        console.warn(`[Embedder] Daily quota hit after ${processed}/${chunks.length} chunks. ${remaining} chunks will be embedded on next sync.`)
+        break
+      }
       failed += batch.length
-      console.error(`[Embedder] Batch failed (${i}-${i + BATCH_SIZE}):`, (err as Error).message)
+      console.error(`[Embedder] Batch failed (${i}-${i + batchSize}):`, errMsg)
     }
   }
 
@@ -354,12 +466,14 @@ export async function embedProjectChunks(
   return processed
 }
 
-export async function preloadEmbeddingModel(): Promise<void> {
+export async function preloadEmbeddingModel(providerOverride?: EmbeddingProviderType): Promise<void> {
   try {
-    await embedTexts(['preload test'])
-    const provider = getEmbeddingProvider()
-    const model = provider === 'voyage' ? getSelectedVoyageModel() : JINA_MODEL
-    console.log(`[Embedder] Ready: ${model} via ${provider} (${EMBEDDING_DIMENSIONS} dims, batch=${BATCH_SIZE})`)
+    await embedTexts(['preload test'], providerOverride)
+    const provider = providerOverride || getEmbeddingProvider()
+    const model = provider === 'voyage' ? getSelectedVoyageModel()
+      : provider === 'github' ? GITHUB_MODELS_EMBEDDING_MODEL
+      : JINA_MODEL
+    console.log(`[Embedder] Ready: ${model} via ${provider} (${EMBEDDING_DIMENSIONS} dims, batch=${getBatchSize(provider)})`)
   } catch (err) {
     console.warn('[Embedder] Not available:', (err as Error).message)
   }
@@ -385,16 +499,65 @@ export async function reEmbedProject(
 }
 
 export function isEmbedderAvailable(): boolean {
-  return !!getVoyageApiKey() || !!getJinaApiKey() || (!!getProxyUrl() && !!getProxyKey())
+  return !!getVoyageApiKey() || !!getJinaApiKey() || getEmbeddingProvider() === 'github' || (!!getProxyUrl() && !!getProxyKey())
 }
 
-export function getEmbedderStatus(): { provider: string; model: string; batchSize: number; tokenLimit: number; tokensUsed: number } {
+export interface ThrottleStatusInfo {
+  provider: string
+  rpmCurrent: number
+  rpmLastMinute: number
+  requestsPerMinute: number
+  requestsToday: number
+  requestsPerDay: number
+  totalRequestsSession: number
+  dailyQuotaExhausted: boolean
+  recoveryTimeMs: number
+}
+
+export function getThrottleStatus(): ThrottleStatusInfo[] {
+  const providers = ['voyage', 'jina', 'github', 'proxy'] as const
+  return providers
+    .filter(p => {
+      if (p === 'voyage') return !!getVoyageApiKey()
+      if (p === 'jina') return !!getJinaApiKey()
+      if (p === 'github') return !!(getGitHubPAT() && (getEmbeddingProvider() === 'github' || getBulkEmbeddingProvider() === 'github'))
+      return false
+    })
+    .map(p => {
+      const t = getThrottle(p)
+      const limits = getLimits(p)
+      resetWindowIfExpired(t)
+      const dailyExhausted = t.requestsToday >= limits.requestsPerDay
+      const recoveryMs = dailyExhausted
+        ? Math.max(0, 86_400_000 - (Date.now() - t.dayWindowStart))
+        : 0
+      return {
+        provider: p,
+        rpmCurrent: t.requestsThisMinute,
+        rpmLastMinute: t.requestsLastMinute,
+        requestsPerMinute: limits.requestsPerMinute,
+        requestsToday: t.requestsToday,
+        requestsPerDay: limits.requestsPerDay === Infinity ? -1 : limits.requestsPerDay,
+        totalRequestsSession: t.totalRequestsSession,
+        dailyQuotaExhausted: dailyExhausted,
+        recoveryTimeMs: recoveryMs,
+      }
+    })
+}
+
+export function getEmbedderStatus(): { provider: string; model: string; batchSize: number; tokenLimit: number; tokensUsed: number; requestsToday: number; dailyLimit: number } {
   const provider = getEmbeddingProvider()
+  const limits = getLimits()
+  const model = provider === 'voyage' ? getSelectedVoyageModel()
+    : provider === 'github' ? GITHUB_MODELS_EMBEDDING_MODEL
+    : JINA_MODEL
   return {
     provider,
-    model: provider === 'voyage' ? getSelectedVoyageModel() : JINA_MODEL,
-    batchSize: BATCH_SIZE,
-    tokenLimit: TOKEN_LIMIT_PER_MINUTE,
-    tokensUsed: tokenBucket.tokens
+    model,
+    batchSize: limits.batchSize,
+    tokenLimit: limits.tokenLimitPerMinute,
+    tokensUsed: getThrottle(provider).tokensUsed,
+    requestsToday: getThrottle(provider).requestsToday,
+    dailyLimit: limits.requestsPerDay,
   }
 }

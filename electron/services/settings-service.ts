@@ -289,9 +289,31 @@ export function setVoyageApiKey(key: string): void {
   setSetting('voyage_api_key', key, true)
 }
 
-export function getEmbeddingProvider(): 'voyage' | 'jina' | 'proxy' {
+// ============================
+// GitHub Models Embedding (Free with GitHub PAT)
+// ============================
+
+export function getGitHubModelsEmbeddingEnabled(): boolean {
+  return getSetting('github_models_embedding') === 'true'
+}
+
+export function setGitHubModelsEmbeddingEnabled(enabled: boolean): void {
+  setSetting('github_models_embedding', enabled ? 'true' : 'false', false)
+}
+
+export type EmbeddingProviderType = 'github' | 'voyage' | 'jina' | 'proxy'
+
+export function getEmbeddingProvider(): EmbeddingProviderType {
+  if (getGitHubModelsEmbeddingEnabled() && getGitHubPAT()) return 'github'
   if (getVoyageApiKey()) return 'voyage'
   if (getJinaApiKey()) return 'jina'
+  return 'proxy'
+}
+
+export function getBulkEmbeddingProvider(): EmbeddingProviderType {
+  if (getVoyageApiKey()) return 'voyage'
+  if (getJinaApiKey()) return 'jina'
+  if (getGitHubModelsEmbeddingEnabled() && getGitHubPAT()) return 'github'
   return 'proxy'
 }
 

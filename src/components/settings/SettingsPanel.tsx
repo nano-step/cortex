@@ -63,6 +63,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
   const [embeddingTestLatency, setEmbeddingTestLatency] = useState(0)
 
 
+  const [githubModelsEmbedding, setGithubModelsEmbedding] = useState(false)
+
   const [voyageApiKey, setVoyageApiKey] = useState('')
   const [showVoyageKey, setShowVoyageKey] = useState(false)
   const [voyageModels, setVoyageModels] = useState<Array<{ id: string; name: string; dims: number; description: string }>>([])
@@ -117,6 +119,8 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         if (jk) setJinaApiKey(jk)
         const vk = await window.electronAPI?.getVoyageApiKey?.()
         if (vk) setVoyageApiKey(vk)
+        const gme = await window.electronAPI?.getGitHubModelsEmbeddingEnabled?.()
+        if (gme) setGithubModelsEmbedding(gme)
         const vm = await window.electronAPI?.getVoyageModels?.()
         if (vm) setVoyageModels(vm)
         const svm = await window.electronAPI?.getSelectedVoyageModel?.()
@@ -256,6 +260,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       if (openrouterApiKey) {
         await window.electronAPI.setOpenRouterApiKey(openrouterApiKey)
       }
+      await window.electronAPI.setGitHubModelsEmbeddingEnabled(githubModelsEmbedding)
       setSaveStatus('success')
       setTimeout(() => setSaveStatus('idle'), 3000)
     } catch (err) {
@@ -266,7 +271,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false)
     }
-  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, comfyuiApiKey, openrouterApiKey])
+  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, comfyuiApiKey, openrouterApiKey, githubModelsEmbedding])
 
   if (!open) return null
 
@@ -429,6 +434,22 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
                     <AlertCircle size={14} /> {embeddingTestError}
                   </span>
                 )}
+              </div>
+
+              <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
+                <label className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-secondary)] mb-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={githubModelsEmbedding}
+                    onChange={(e) => setGithubModelsEmbedding(e.target.checked)}
+                    className="rounded border-[var(--border-primary)]"
+                  />
+                  GitHub Models Embedding (Free)
+                  {githubModelsEmbedding && <span className="text-[10px] text-green-500">● Active</span>}
+                </label>
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1 mb-3">
+                  Dùng text-embedding-3-small miễn phí qua GitHub Models API. Cần GitHub PAT đã cấu hình ở mục GitHub bên dưới.
+                </p>
               </div>
 
               <div className="border-t border-[var(--border-primary)] pt-3 mt-2">
