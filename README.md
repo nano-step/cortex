@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.2.0%20Synapse-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.3.0%20Dendrite-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
@@ -29,7 +29,7 @@ Most "AI coding tools" are thin wrappers: paste code → send to API → show re
 | One model, one response | **12 agents** with different strategies, multiple models, parallel execution |
 | No context beyond pasted code | **Index your entire repo** — AST parsing, dependency graphs, vector embeddings, git history |
 
-**The difference shows in practice:**
+**The difference shows in practice** (v4.3.0 Dendrite — self-trains 24/7):
 
 ```
 // ChatGPT wrapper response to "How to add pagination?":
@@ -140,6 +140,44 @@ Feedback Detector (accepts, rejects, follow-ups, copy patterns)
 Learned Reranker → Adjusts search result weights
     ↓
 Over time: results align with what YOU find useful
+```
+
+### Layer 7: Auto-Training — Dendrite Engine (v4.3.0)
+
+Cortex now trains itself **24/7 without user interaction**:
+
+```
+App idle (2+ min)
+    ↓
+[AutoScan] Read codebase chunks in batches (100/batch)
+    ↓
+[AutoTraining] Generate Q&A pairs via LLM (Self-Instruct style)
+    ├── 3 question types: factual / conceptual / relational
+    ├── Evol-Instruct: 30% chance mutate to harder questions
+    └── LLM-as-Judge: score 4 criteria (1-5), accept if avg ≥ 4.0
+    ↓
+[AutoScan] Scan Jira issues → sprint/bug/team Q&A pairs
+[AutoScan] Scan Confluence pages → technical/architecture Q&A pairs
+[AutoScan] Scan Knowledge Crystals → insight Q&A pairs
+    ↓
+[Learning] Save accepted pairs → training_pairs + archival_memory
+    ↓
+5-second cooldown → restart loop (continuous 24/7)
+```
+
+**What it learns about your project:**
+- Code patterns, architecture decisions, function relationships
+- Sprint history, bug patterns, team workload (from Jira)
+- Technical documentation, design decisions (from Confluence)
+- Accumulated knowledge crystals from past conversations
+
+**Logging** — all training activity visible in CLI console:
+```
+[AutoScan][25/03/2026 23:14:07]   [Code] Batch offset=8700 | 100 chunks
+[AutoTraining][25/03/2026 23:14:09] LLM ok 2341ms | q-gen 10chunks
+[AutoTraining][25/03/2026 23:14:11] [Code/factual] services/llm-client.ts | Q: "What does..."
+[Learning][25/03/2026 23:14:14]   Luu pair | score=4.3 | "What does sanitizeTemperature do..."
+[AutoScan][25/03/2026 23:14:35]   [Jira] 18 issues | bat dau phan tich sprint/bug/team...
 ```
 
 ---
