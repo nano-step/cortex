@@ -106,6 +106,7 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
   const [training, setTraining] = useState(false)
   const [trainResult, setTrainResult] = useState<{ trained: number; weights: number; optimized: boolean } | null>(null)
   const [learningOpen, setLearningOpen] = useState(true)
+  const [reposOpen, setReposOpen] = useState(true)
   const [mcpOpen, setMcpOpen] = useState(false)
 
   const [throttleStatus, setThrottleStatus] = useState<Array<{ provider: string; rpmCurrent: number; rpmLastMinute: number; requestsPerMinute: number; requestsToday: number; requestsPerDay: number; totalRequestsSession: number; dailyQuotaExhausted: boolean; recoveryTimeMs: number }>>([])
@@ -695,13 +696,22 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
               {/* Repos */}
               {stats.repos.length > 0 && (
                 <section>
-                  <div className="flex items-center gap-2 mb-3">
-                    <GitGraph size={16} className="text-[var(--accent-primary)]" />
-                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
-                      Repositories
-                    </h3>
-                  </div>
-                  <div className="space-y-2">
+                  <button
+                    onClick={() => setReposOpen(!reposOpen)}
+                    className="flex items-center gap-2 w-full mb-3"
+                  >
+                    {reposOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    <div className="flex items-center gap-2">
+                      <GitGraph size={16} className="text-[var(--accent-primary)]" />
+                      <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                        Repositories
+                      </h3>
+                    </div>
+                    <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
+                      {stats.repos.length} repo{stats.repos.length !== 1 ? 's' : ''}
+                    </span>
+                  </button>
+                  {reposOpen && <div className="space-y-2">
                     {stats.repos.map((repo) => (
                       <div
                         key={repo.id}
@@ -831,7 +841,7 @@ export function BrainDashboard({ open, onClose, projectId }: BrainDashboardProps
                         })()}
                       </div>
                     ))}
-                  </div>
+                  </div>}
                 </section>
               )}
 
