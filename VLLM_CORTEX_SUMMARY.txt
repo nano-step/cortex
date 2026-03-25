@@ -1,0 +1,173 @@
+================================================================================
+vLLM → CORTEX: ARCHITECTURAL PATTERNS EXTRACTION
+================================================================================
+
+ANALYSIS COMPLETED: March 25, 2026
+vLLM Commit: cd7643015e583c1e78d437118a6ce8282cb85663
+Status: ✅ READY FOR IMPLEMENTATION
+
+================================================================================
+KEY FINDINGS: 6 PRODUCTION-READY PATTERNS
+================================================================================
+
+1. CONTINUOUS BATCHING + SCHEDULER
+   ├─ vLLM Source: vllm/v1/core/sched/scheduler.py (L341-360)
+   ├─ Pattern: Unified scheduling (no separate prefill/decode phases)
+   ├─ Cortex Use: Async LLM call orchestration for auto-training
+   ├─ Key Insight: Token budget allocation across priority-ordered requests
+   └─ Status: ✅ READY - Can implement immediately
+
+2. PAGED ATTENTION + KV CACHE MANAGEMENT
+   ├─ vLLM Source: vllm/v1/attention/ops/paged_attn.py
+   ├─ Pattern: Block-based KV cache with prefix hashing
+   ├─ Cortex Use: Semantic cache for prompt embeddings & LLM outputs
+   ├─ Key Insight: Zero-copy attention over cached blocks (BlockHash)
+   └─ Status: ✅ READY - Applicable to DSPy program caching
+
+3. REQUEST LIFECYCLE & STATUS TRACKING
+   ├─ vLLM Source: vllm/v1/request.py (L58-150)
+   ├─ Pattern: State machine with event logging
+   ├─ Cortex Use: Prompt optimization pipeline (WAITING → OPTIMIZING → FINISHED)
+   ├─ Key Insight: Resumable requests, preemption support
+   └─ Status: ✅ READY - Clear state transitions
+
+4. SAMPLING PARAMETERS STRATEGY
+   ├─ vLLM Source: vllm/sampling_params.py (L150-250)
+   ├─ Pattern: Fine-grained control over generation diversity
+   ├─ Cortex Use: Synthetic data generation (temperature, top_p, penalties)
+   ├─ Key Insight: Structured output enforcement (JSON/regex/grammar)
+   └─ Status: ✅ READY - Diversity/quality tradeoff control
+
+5. ASYNC ENGINE PATTERN
+   ├─ vLLM Source: vllm/v1/engine/async_llm.py (L71-120)
+   ├─ Pattern: Background asyncio loop for continuous request processing
+   ├─ Cortex Use: Non-blocking auto-training workflows
+   ├─ Key Insight: Doesn't block main inference, supports streaming
+   └─ Status: ✅ READY - Production-grade async/await
+
+6. MODEL LOADING & WEIGHT MANAGEMENT
+   ├─ vLLM Source: vllm/v1/engine/llm_engine.py (L48-80)
+   ├─ Pattern: Modular executor + scheduler architecture
+   ├─ Cortex Use: Multi-model routing (optimization, evaluation, generation)
+   ├─ Key Insight: VllmConfig encapsulates all configuration
+   └─ Status: ✅ READY - Extensible design
+
+================================================================================
+CONCRETE IMPLEMENTATION EXAMPLES
+================================================================================
+
+PATTERN 1: CortexScheduler
+├─ Priority-based request queue (optimization > generation > eval)
+├─ Token budget allocation per scheduling step
+├─ Preemption support for long-running tasks
+└─ Code: ~150 lines (ready to implement)
+
+PATTERN 2: SemanticCache
+├─ Block-based hashing (sha256 of token blocks)
+├─ LRU eviction when cache full
+├─ Zero-copy KV state reuse
+└─ Code: ~200 lines (ready to implement)
+
+PATTERN 3: PromptOptimizationRequest
+├─ State machine: WAITING → GENERATING → EVALUATING → FINISHED
+├─ Event logging for debugging
+├─ Variant tracking with scores
+└─ Code: ~250 lines (ready to implement)
+
+PATTERN 4: SyntheticDataGenerator
+├─ Diverse examples (high temperature + top_p)
+├─ Consistent examples (low temperature)
+├─ Structured output (JSON schema enforcement)
+├─ Constrained generation (custom logits processors)
+└─ Code: ~300 lines (ready to implement)
+
+PATTERN 5: CortexAutoTrainer
+├─ Background asyncio loop for training tasks
+├─ Non-blocking prompt optimization
+├─ Non-blocking synthetic data generation
+├─ Non-blocking model evaluation
+└─ Code: ~400 lines (ready to implement)
+
+PATTERN 6: CortexModelRouter
+├─ Multi-model support (base, optimization, evaluation, synthetic)
+├─ Task-based routing
+├─ Unified VllmConfig interface
+└─ Code: ~150 lines (ready to implement)
+
+================================================================================
+DOWNSTREAM APPLICATIONS
+================================================================================
+
+✅ DSPy Bridge Enhancement
+   └─ Cache compiled DSPy programs using prefix caching (Pattern 2)
+
+✅ Auto-Scan Optimization
+   └─ Use CortexScheduler to manage concurrent scan tasks (Pattern 1)
+
+✅ Semantic Cache Layer
+   └─ Implement SemanticCache for prompt embeddings (Pattern 2)
+
+✅ Model Routing
+   └─ Use CortexModelRouter for task-specific models (Pattern 6)
+
+✅ Synthetic Data Pipeline
+   └─ Use SyntheticDataGenerator for training data (Pattern 4)
+
+✅ Continuous Learning
+   └─ Use CortexAutoTrainer for background optimization (Pattern 5)
+
+================================================================================
+IMPLEMENTATION ROADMAP
+================================================================================
+
+PHASE 1: CORE PATTERNS (Weeks 1-2)
+├─ [ ] CortexScheduler (Pattern 1)
+├─ [ ] SemanticCache (Pattern 2)
+└─ [ ] PromptOptimizationRequest (Pattern 3)
+
+PHASE 2: AUTO-TRAINING (Weeks 3-4)
+├─ [ ] SyntheticDataGenerator (Pattern 4)
+├─ [ ] CortexAutoTrainer (Pattern 5)
+└─ [ ] Integration with DSPy bridge
+
+PHASE 3: ADVANCED FEATURES (Weeks 5-6)
+├─ [ ] CortexModelRouter (Pattern 6)
+├─ [ ] Prefix caching for DSPy programs (Pattern 7)
+└─ [ ] Speculative decoding (Pattern 8)
+
+================================================================================
+GITHUB PERMALINKS (for reference)
+================================================================================
+
+Scheduler:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/core/sched/scheduler.py#L341-L360
+
+PagedAttention:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/attention/ops/paged_attn.py
+
+Request:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/request.py#L58-L150
+
+SamplingParams:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/sampling_params.py#L150-L250
+
+AsyncLLM:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/engine/async_llm.py#L71-L120
+
+LLMEngine:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/engine/llm_engine.py#L48-L80
+
+KV Cache Utils:
+https://github.com/vllm-project/vllm/blob/cd7643015e583c1e78d437118a6ce8282cb85663/vllm/v1/core/kv_cache_utils.py#L1-L80
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Review /tmp/vllm_cortex_analysis.md for detailed implementation guide
+2. Start with Pattern 1 (CortexScheduler) - foundational for others
+3. Implement patterns in order: 1 → 2 → 3 → 4 → 5 → 6
+4. Each pattern has ~150-400 lines of code (manageable scope)
+5. All patterns are production-ready (no experimental features)
+
+================================================================================
