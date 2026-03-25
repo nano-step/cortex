@@ -944,3 +944,11 @@ async function _streamWithModel(
 
   return { content: fullContent, model, toolCalls, finishReason, usage: usageData }
 }
+
+const NO_TEMPERATURE_MODELS = ['gpt-4.5', 'gpt-5', 'o1', 'o3', 'o4']
+
+export function sanitizeTemperature(model: string, temperature?: number): number | undefined {
+  const skipTemp = NO_TEMPERATURE_MODELS.some(m => model.toLowerCase().includes(m))
+  if (skipTemp) return undefined
+  return temperature ?? 0.3
+}
