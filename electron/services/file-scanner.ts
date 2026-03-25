@@ -53,8 +53,17 @@ const EXTENSION_MAP: Record<string, string> = {
   '.exs': 'elixir',
   '.erl': 'erlang',
   '.zig': 'zig',
-  '.dart': 'dart'
+  '.dart': 'dart',
+  '.pdf': 'pdf',
+  '.docx': 'docx',
+  '.xlsx': 'xlsx',
+  '.xls': 'xlsx',
+  '.csv': 'csv',
+  '.htm': 'html'
 }
+
+const DOCUMENT_EXTENSIONS = new Set(['.pdf', '.docx', '.xlsx', '.xls', '.csv', '.html', '.htm'])
+const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
 
 // Directories to always skip
 const SKIP_DIRS = new Set([
@@ -170,7 +179,8 @@ export async function scanDirectory(
 
       try {
         const fileStat = await stat(fullPath)
-        if (fileStat.size > MAX_FILE_SIZE) continue
+        const sizeLimit = DOCUMENT_EXTENSIONS.has(ext) ? MAX_DOCUMENT_SIZE : MAX_FILE_SIZE
+        if (fileStat.size > sizeLimit) continue
         if (fileStat.size === 0) continue
 
         files.push({

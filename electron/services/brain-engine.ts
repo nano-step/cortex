@@ -10,7 +10,8 @@
 
 import { BrowserWindow } from 'electron'
 import { scanDirectory, readFileContent, getDirectoryTree, type ScannedFile } from './file-scanner'
-import { chunkCode, type CodeChunk } from './code-chunker'
+import { chunkCode, chunkDocument, type CodeChunk } from './code-chunker'
+import { convertDocument, isDocumentFile } from './document-converter'
 import { getDb, chunkQueries, repoQueries, repoTreeQueries } from './db'
 import { randomUUID } from 'crypto'
 import { embedProjectChunks, needsReEmbed, reEmbedProject } from './embedder'
@@ -106,16 +107,19 @@ export async function indexLocalRepository(
       const file = files[i]
 
       try {
-        const content = await readFileContent(file.path)
-        const chunks = chunkCode(
-          content,
-          file.path,
-          file.relativePath,
-          file.language,
-          projectId,
-          repoId,
-          branch
-        )
+        let chunks: CodeChunk[]
+
+        if (isDocumentFile(file.path)) {
+          const result = await convertDocument(file.path)
+          if (result && result.markdown.trim().length > 0) {
+            chunks = chunkDocument(result.markdown, file.path, file.relativePath, projectId, repoId, result.metadata, branch)
+          } else {
+            chunks = []
+          }
+        } else {
+          const content = await readFileContent(file.path)
+          chunks = chunkCode(content, file.path, file.relativePath, file.language, projectId, repoId, branch)
+        }
 
         batch.push(...chunks)
         totalChunks += chunks.length

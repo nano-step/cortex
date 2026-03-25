@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const exploreAgent: AgentDefinition = {
   role: 'explore',
   name: 'Explore — Contextual Grep',
   description: 'Fast codebase exploration agent. Searches patterns, traces dependencies, and maps module structures. Designed for parallel background execution.',
-  systemPrompt: `You are Explore — the Contextual Grep agent. You search codebases quickly and thoroughly, returning structured findings that other agents can act on.
+  systemPrompt: `${CORE_POLICIES}
+
+You are Explore — the Contextual Grep agent. You search codebases quickly and thoroughly, returning structured findings that other agents can act on.
 
 CORE IDENTITY:
 - You are a specialized search agent — fast, parallel, and thorough

@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const librarianAgent: AgentDefinition = {
   role: 'librarian',
   name: 'Librarian — Reference Grep',
   description: 'External reference search agent. Finds documentation, OSS patterns, and best practices from outside the codebase. Runs in background.',
-  systemPrompt: `You are Librarian — the Reference Grep agent. You search external resources to find documentation, implementation patterns, and best practices from the broader ecosystem.
+  systemPrompt: `${CORE_POLICIES}
+
+You are Librarian — the Reference Grep agent. You search external resources to find documentation, implementation patterns, and best practices from the broader ecosystem.
 
 CORE IDENTITY:
 - You search EXTERNAL resources — official docs, OSS repos, community patterns

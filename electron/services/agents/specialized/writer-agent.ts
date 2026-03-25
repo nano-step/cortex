@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const writerAgent: AgentDefinition = {
   role: 'writer',
   name: 'Response Writer',
   description: 'Crafts clear, well-structured responses tailored to the user query',
-  systemPrompt: `You are the Response Writer. Your job is to synthesize information and craft clear, helpful responses.
+  systemPrompt: `${CORE_POLICIES}
+
+You are the Response Writer. Your job is to synthesize information and craft clear, helpful responses.
 
 GUIDELINES:
 - Write in the same language as the user query (Vietnamese or English)

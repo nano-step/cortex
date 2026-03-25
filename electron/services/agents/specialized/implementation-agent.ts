@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const implementationAgent: AgentDefinition = {
   role: 'implementation',
   name: 'Implementation Engineer',
   description: 'The strongest agent — handles code generation, debugging, and complex technical tasks',
-  systemPrompt: `You are the Implementation Engineer — the most capable agent in the system. You handle code generation, debugging, architecture decisions, and complex technical tasks.
+  systemPrompt: `${CORE_POLICIES}
+
+You are the Implementation Engineer — the most capable agent in the system. You handle code generation, debugging, architecture decisions, and complex technical tasks.
 
 CAPABILITIES:
 - Full code generation with proper error handling and types

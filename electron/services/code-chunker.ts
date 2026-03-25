@@ -31,6 +31,7 @@ export type ChunkType =
   | 'route'
   | 'schema'
   | 'test'
+  | 'document'
   | 'other'
 
 export interface CodeChunk {
@@ -648,4 +649,96 @@ function createChunk(params: Omit<CodeChunk, 'id' | 'tokenEstimate' | 'metadata'
     metadata: {},
     branch: 'main' // Will be overridden by chunkCode caller
   }
+}
+
+export function chunkDocument(
+  convertedMarkdown: string,
+  filePath: string,
+  relativePath: string,
+  projectId: string,
+  repoId: string,
+  sourceMetadata: Record<string, string | number | undefined>,
+  branch: string = 'main'
+): CodeChunk[] {
+  if (!convertedMarkdown || convertedMarkdown.trim().length === 0) return []
+
+  const lines = convertedMarkdown.split('\n')
+  const totalTokens = estimateTokens(convertedMarkdown)
+  const sourceFormat = String(sourceMetadata.sourceFormat ?? 'document')
+
+  if (totalTokens <= MAX_CHUNK_TOKENS) {
+    const chunk = createChunk({
+      projectId,
+      repoId,
+      filePath,
+      relativePath,
+      language: sourceFormat,
+      chunkType: 'document',
+      name: String(sourceMetadata.title ?? relativePath.split('/').pop() ?? relativePath),
+      content: convertedMarkdown,
+      lineStart: 1,
+      lineEnd: lines.length,
+      dependencies: [],
+      exports: []
+    })
+    chunk.metadata = buildDocMetadata(sourceMetadata)
+    return [{ ...chunk, branch }]
+  }
+
+  const headerPattern = /^#{1,3}\s+/
+  const sections: Array<{ start: number; end: number; heading: string }> = []
+  let currentStart = 0
+  let currentHeading = relativePath.split('/').pop() ?? relativePath
+
+  for (let i = 0; i < lines.length; i++) {
+    if (headerPattern.test(lines[i]) && i > currentStart) {
+      sections.push({ start: currentStart, end: i, heading: currentHeading })
+      currentStart = i
+      currentHeading = lines[i].replace(/^#+\s+/, '').trim()
+    }
+  }
+  sections.push({ start: currentStart, end: lines.length, heading: currentHeading })
+
+  const chunks: CodeChunk[] = []
+  for (const section of sections) {
+    const sectionContent = lines.slice(section.start, section.end).join('\n').trim()
+    if (estimateTokens(sectionContent) < MIN_CHUNK_TOKENS) continue
+
+    const chunk = createChunk({
+      projectId,
+      repoId,
+      filePath,
+      relativePath,
+      language: sourceFormat,
+      chunkType: 'document',
+      name: section.heading,
+      content: sectionContent,
+      lineStart: section.start + 1,
+      lineEnd: section.end,
+      dependencies: [],
+      exports: []
+    })
+    chunk.metadata = buildDocMetadata(sourceMetadata)
+    chunks.push({ ...chunk, branch })
+  }
+
+  return chunks.length > 0 ? chunks : [{
+    ...createChunk({
+      projectId, repoId, filePath, relativePath,
+      language: sourceFormat, chunkType: 'document',
+      name: String(sourceMetadata.title ?? relativePath.split('/').pop() ?? relativePath),
+      content: convertedMarkdown.slice(0, MAX_CHUNK_TOKENS * CHARS_PER_TOKEN),
+      lineStart: 1, lineEnd: lines.length, dependencies: [], exports: []
+    }),
+    metadata: buildDocMetadata(sourceMetadata),
+    branch
+  }]
+}
+
+function buildDocMetadata(sourceMetadata: Record<string, string | number | undefined>): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const [k, v] of Object.entries(sourceMetadata)) {
+    if (v !== undefined) result[k] = String(v)
+  }
+  return result
 }

@@ -16,6 +16,7 @@ import { resolve, dirname, relative, extname, isAbsolute } from 'path'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getDb, repoQueries } from '../../db'
 import { getSetting } from '../../settings-service'
+import { convertDocument, isDocumentFile } from '../../document-converter'
 
 // =====================
 // Tool Definitions
@@ -246,6 +247,23 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
         required: ['path']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_read_document',
+      description: 'Read and convert a document file (PDF, DOCX, XLSX, CSV, HTML) to readable markdown text. Use this instead of cortex_read_file for non-code documents. Returns extracted text with metadata (page count, sheet names, title, author).',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Path to the document file relative to the repository root. Supports: .pdf, .docx, .xlsx, .xls, .csv, .html, .htm'
+          }
+        },
+        required: ['path']
+      }
+    }
   }
 ]
 
@@ -258,7 +276,7 @@ const MAX_BATCH_FILES = 10
 const MAX_GREP_RESULTS = 200
 const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.svg',
-  '.mp4', '.mp3', '.wav', '.pdf', '.zip', '.tar', '.gz',
+  '.mp4', '.mp3', '.wav', '.zip', '.tar', '.gz',
   '.exe', '.dll', '.so', '.dylib', '.wasm',
   '.ttf', '.woff', '.woff2', '.eot'
 ])
@@ -814,6 +832,45 @@ function toolDeleteFile(
   }
 }
 
+async function toolReadDocument(
+  repoPaths: string[],
+  args: { path: string }
+): Promise<{ content: string; isError: boolean }> {
+  try {
+    const absPath = resolveSafePath(repoPaths, args.path)
+
+    if (!existsSync(absPath)) {
+      return { content: `File not found: ${args.path}`, isError: true }
+    }
+
+    if (!isDocumentFile(absPath)) {
+      return {
+        content: `"${args.path}" is not a supported document format. Supported: .pdf, .docx, .xlsx, .xls, .csv, .html, .htm. Use cortex_read_file for text/code files.`,
+        isError: true
+      }
+    }
+
+    const result = await convertDocument(absPath)
+    if (!result) {
+      return { content: `No converter available for "${args.path}".`, isError: true }
+    }
+
+    const metaLines: string[] = []
+    for (const [k, v] of Object.entries(result.metadata)) {
+      if (v !== undefined) metaLines.push(`${k}: ${v}`)
+    }
+
+    const header = metaLines.length > 0
+      ? `[Document: ${args.path}]\n${metaLines.join(' | ')}\n\n`
+      : `[Document: ${args.path}]\n\n`
+
+    console.log(`[FilesystemTools] Read document: ${args.path} (${result.markdown.length} chars)`)
+    return { content: header + result.markdown, isError: false }
+  } catch (err) {
+    return { content: `Error reading document: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
+}
+
 // =====================
 // Public API
 // =====================
@@ -882,6 +939,9 @@ export async function executeBuiltinTool(
 
     case 'cortex_delete_file':
       return toolDeleteFile(repoPaths, args as { path: string })
+
+    case 'cortex_read_document':
+      return toolReadDocument(repoPaths, args as { path: string })
 
     default:
       return { content: `Unknown builtin tool: ${toolName}`, isError: true }
