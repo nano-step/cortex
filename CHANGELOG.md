@@ -223,7 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Improved
 - New navigation — 5 V2 buttons (Memory, Skills, Learning, Cost, Agent) in the ChatArea toolbar
 - Version bumped to v2.0.0
-- Architecture documentation — `CORTEX_V2_ARCHITECTURE.md`, `CORTEX_V2_STRATEGY.md`, `CORTEX_V2_SKILL_CATALOG.md`, `CORTEX_V2_SPRINT_PLAN.md`
+- Architecture documentation — `ARCHITECTURE.md`, `STRATEGY.md`, `SKILL_CATALOG.md`, `SPRINT_PLAN.md`
 
 ### Security
 - Terminal command allowlist — allows only 24 safe commands, blocks dangerous patterns (rm -rf /, sudo, chmod 777, fork bomb)

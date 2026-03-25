@@ -389,4 +389,4 @@ Cortex does what NO ONE else does:
 ---
 
 *This document will be updated as strategy evolves.*
-*See details at: CORTEX_V2_SKILL_CATALOG.md, CORTEX_V2_SPRINT_PLAN.md, CORTEX_V2_ARCHITECTURE.md*
+*See details at: SKILL_CATALOG.md, SPRINT_PLAN.md, ARCHITECTURE.md*

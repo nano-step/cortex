@@ -11,7 +11,7 @@
 
 A desktop AI assistant that deeply understands your entire codebase — not a ChatGPT wrapper, but a full engineering intelligence platform with persistent memory, multi-agent orchestration, and self-learning.
 
-[⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](CORTEX_V2_ARCHITECTURE.md) · [📦 Skill Catalog](CORTEX_V2_SKILL_CATALOG.md) · [🗺️ Strategy](CORTEX_V2_STRATEGY.md)
+[⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](ARCHITECTURE.md) · [📦 Skill Catalog](SKILL_CATALOG.md) · [🗺️ Strategy](STRATEGY.md)
 
 </div>
 
