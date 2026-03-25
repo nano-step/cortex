@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.0.0-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.1.0-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
@@ -99,7 +99,7 @@ Cortex doesn't just answer from knowledge — it **acts**:
 | **Vision** | `analyze_image`, `compare_images` | FREE image analysis via OpenRouter (healer-alpha, hunter-alpha) |
 | **Artist** | `generate_image`, `edit_image` | AI image generation with 8 style presets (anime, watercolor, pixel-art...) |
 | **Web** | `perplexity_search`, `perplexity_read_url` | Real-time web search and URL reading |
-| **File System** | `read_file`, `list_directory`, `search_files` | Read and navigate project files |
+| **File System** | `cortex_read_file`, `cortex_write_file`, `cortex_edit_file`, `cortex_read_files`, `cortex_grep_search`, `cortex_edit_files`, `cortex_list_directory`, `cortex_move_file`, `cortex_delete_file` | Full read/write/search — supports chunk reading (10MB), batch parallel I/O, progressive edit fallback, unrestricted mode |
 
 ### Layer 4: Memory (3-Tier Persistent)
 
@@ -125,6 +125,8 @@ Not one LLM call — a **team** of specialized agents:
 | **Explore** | Contextual grep — codebase pattern finder | Background research |
 | **Librarian** | Reference grep — external docs/examples | Documentation lookup |
 | + 5 more | Security, Performance, Review, Writer, Formatter | Specialist analysis |
+
+**Agent Pool resilience** — All agents run with exponential backoff (1s/2s/4s), Retry-After header support, dynamic model selection from proxy's live model list, and automatic tier fallback (`fast → balanced → premium`) when quota is exhausted.
 
 ### Layer 6: Self-Learning
 
@@ -260,6 +262,8 @@ npm run dev
 | `npm run dev` | Start with hot reload |
 | `npm run build` | Production build |
 | `npm run dist:mac` | Build macOS `.dmg` |
+| `npm run test` | Run unit tests |
+| `npm run test:watch` | Run tests in watch mode |
 
 ---
 

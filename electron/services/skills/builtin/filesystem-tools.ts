@@ -10,10 +10,12 @@
  * All paths are sandboxed to project repository directories for security.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from 'fs'
-import { resolve, dirname, relative } from 'path'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync, renameSync, unlinkSync, rmdirSync } from 'fs'
+import { readFile as readFileAsync } from 'fs/promises'
+import { resolve, dirname, relative, extname, isAbsolute } from 'path'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getDb, repoQueries } from '../../db'
+import { getSetting } from '../../settings-service'
 
 // =====================
 // Tool Definitions
@@ -24,13 +26,21 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_read_file',
-      description: 'Read the contents of a file at the given path relative to the project repository root. Returns the file content as text. Maximum file size: 1MB.',
+      description: 'Read the contents of a file. Supports offset+limit for chunk reading of large files (up to 10MB). Path is relative to the project repository root.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
             description: 'File path relative to the repository root (e.g., "src/index.ts", "package.json")'
+          },
+          offset: {
+            type: 'number',
+            description: 'Line number to start reading from (1-indexed). Use with limit to read large files in chunks.'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of lines to read. Use with offset for chunk reading.'
           }
         },
         required: ['path']
@@ -87,16 +97,153 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_list_directory',
-      description: 'List the contents of a directory. Path is relative to the project repository root. Use "." or empty string for repository root.',
+      description: 'List the contents of a directory. Supports recursive traversal with depth control and extension filtering. Path is relative to the project repository root.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
             description: 'Directory path relative to the repository root (e.g., "src", "src/components"). Defaults to root.'
+          },
+          recursive: {
+            type: 'boolean',
+            description: 'Whether to list files recursively in all subdirectories. Defaults to false.'
+          },
+          depth: {
+            type: 'number',
+            description: 'Maximum depth for recursive listing (1-10). Only used when recursive is true. Defaults to 3.'
+          },
+          extensions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Filter files by extension (e.g., [".ts", ".tsx"]). Leave empty to include all files.'
           }
         },
         required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_read_files',
+      description: 'Read multiple files in a single call. More efficient than calling cortex_read_file repeatedly. Supports offset and limit for large files. Returns a map of path to content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of file paths relative to the repository root. Maximum 10 files per call.'
+          },
+          offset: {
+            type: 'number',
+            description: 'Line number to start reading from (1-indexed). Use with limit to read large files in chunks.'
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum number of lines to read per file. Use with offset for chunk reading.'
+          }
+        },
+        required: ['paths']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_grep_search',
+      description: 'Search for a text pattern across multiple files in the project. Returns matching lines with file paths and line numbers. Supports regex patterns.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'Text or regex pattern to search for (e.g., "useState", "async function \\w+", "TODO:")'
+          },
+          directory: {
+            type: 'string',
+            description: 'Directory to search in, relative to repository root. Defaults to root.'
+          },
+          extensions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Limit search to specific file extensions (e.g., [".ts", ".tsx"]). Leave empty to search all text files.'
+          },
+          max_results: {
+            type: 'number',
+            description: 'Maximum number of matches to return. Defaults to 50, maximum 200.'
+          },
+          case_sensitive: {
+            type: 'boolean',
+            description: 'Whether the search is case-sensitive. Defaults to false.'
+          }
+        },
+        required: ['pattern']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_edit_files',
+      description: 'Apply multiple search-and-replace edits across multiple files in a single call. More efficient than calling cortex_edit_file repeatedly. All edits are applied atomically per file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          edits: {
+            type: 'array',
+            description: 'Array of edit operations to apply.',
+            items: {
+              type: 'object',
+              properties: {
+                path: { type: 'string', description: 'File path relative to repository root.' },
+                old_string: { type: 'string', description: 'Exact text to find.' },
+                new_string: { type: 'string', description: 'Text to replace with.' }
+              },
+              required: ['path', 'old_string', 'new_string']
+            }
+          }
+        },
+        required: ['edits']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_move_file',
+      description: 'Move or rename a file or directory within the project repository. Both source and destination must be within project boundaries.',
+      parameters: {
+        type: 'object',
+        properties: {
+          source: {
+            type: 'string',
+            description: 'Source path relative to repository root.'
+          },
+          destination: {
+            type: 'string',
+            description: 'Destination path relative to repository root.'
+          }
+        },
+        required: ['source', 'destination']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_delete_file',
+      description: 'Delete a file or empty directory from the project repository. Use with caution — this is irreversible unless the project uses git.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Path to the file or empty directory to delete, relative to repository root.'
+          }
+        },
+        required: ['path']
       }
     }
   }
@@ -106,26 +253,52 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
 // Path Security
 // =====================
 
-const MAX_READ_SIZE = 1024 * 1024 // 1MB
+const MAX_READ_SIZE = 10 * 1024 * 1024
+const MAX_BATCH_FILES = 10
+const MAX_GREP_RESULTS = 200
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.svg',
+  '.mp4', '.mp3', '.wav', '.pdf', '.zip', '.tar', '.gz',
+  '.exe', '.dll', '.so', '.dylib', '.wasm',
+  '.ttf', '.woff', '.woff2', '.eot'
+])
 
-/**
- * Resolve a relative path against project repo roots with security checks.
- * Returns the first valid absolute path that falls within a repo directory.
- * Throws if the path escapes all repo boundaries.
- */
+const PROTECTED_PATHS = [
+  '/System', '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin',
+  '/var', '/Library/LaunchDaemons', '/Library/LaunchAgents'
+]
+
+function isUnrestrictedMode(): boolean {
+  return getSetting('filesystem_unrestricted_mode') === 'true'
+}
+
 function resolveSafePath(repoPaths: string[], relativePath: string): string {
   if (!relativePath || relativePath.trim() === '') {
     throw new Error('Path cannot be empty')
   }
 
-  // Normalize the input path
   const normalized = relativePath.replace(/\\/g, '/')
+
+  if (isUnrestrictedMode()) {
+    if (isAbsolute(normalized)) {
+      const resolved = resolve(normalized)
+      for (const blocked of PROTECTED_PATHS) {
+        if (resolved.startsWith(blocked)) {
+          throw new Error(`Blocked: "${relativePath}" is in a protected system directory`)
+        }
+      }
+      if (resolved.includes('/node_modules/') || resolved.endsWith('/node_modules')) {
+        throw new Error('Blocked: cannot write to node_modules')
+      }
+      return resolved
+    }
+    if (repoPaths.length > 0) {
+      return resolve(repoPaths[0], normalized)
+    }
+  }
 
   for (const repoRoot of repoPaths) {
     const resolved = resolve(repoRoot, normalized)
-
-    // Security: ensure resolved path is within repo root
-    // Use resolve to canonicalize, then check prefix
     const repoRootResolved = resolve(repoRoot)
     if (resolved.startsWith(repoRootResolved + '/') || resolved === repoRootResolved) {
       return resolved
@@ -134,7 +307,7 @@ function resolveSafePath(repoPaths: string[], relativePath: string): string {
 
   throw new Error(
     `Path "${relativePath}" is outside all project repositories. ` +
-    `Allowed roots: ${repoPaths.join(', ')}`
+    `Allowed roots: ${repoPaths.join(', ')}. Enable unrestricted mode in settings to access files outside project.`
   )
 }
 
@@ -163,7 +336,10 @@ function getRepoPaths(projectId: string): string[] {
 // Tool Implementations
 // =====================
 
-function toolReadFile(repoPaths: string[], args: { path: string }): { content: string; isError: boolean } {
+async function toolReadFile(
+  repoPaths: string[],
+  args: { path: string; offset?: number; limit?: number }
+): Promise<{ content: string; isError: boolean }> {
   try {
     const absPath = resolveSafePath(repoPaths, args.path)
 
@@ -177,19 +353,32 @@ function toolReadFile(repoPaths: string[], args: { path: string }): { content: s
     }
 
     if (stat.size > MAX_READ_SIZE) {
-      return { content: `File too large (${(stat.size / 1024 / 1024).toFixed(2)}MB). Maximum: 1MB.`, isError: true }
+      return {
+        content: `File too large (${(stat.size / 1024 / 1024).toFixed(2)}MB, max ${MAX_READ_SIZE / 1024 / 1024}MB). Use offset+limit to read in chunks.`,
+        isError: true
+      }
     }
 
-    const content = readFileSync(absPath, 'utf-8')
+    const raw = await readFileAsync(absPath, 'utf-8')
 
-    // Basic binary detection: check for null bytes in first 8KB
-    const sample = content.slice(0, 8192)
-    if (sample.includes('\0')) {
-      return { content: `"${args.path}" appears to be a binary file. Only text files can be read.`, isError: true }
+    if (raw.slice(0, 8192).includes('\0')) {
+      return { content: `"${args.path}" appears to be a binary file.`, isError: true }
     }
 
-    console.log(`[FilesystemTools] Read file: ${args.path} (${content.length} chars)`)
-    return { content, isError: false }
+    const lines = raw.split('\n')
+    const totalLines = lines.length
+
+    if (args.offset !== undefined || args.limit !== undefined) {
+      const start = Math.max(0, (args.offset ?? 1) - 1)
+      const end = args.limit !== undefined ? Math.min(start + args.limit, totalLines) : totalLines
+      const slice = lines.slice(start, end)
+      const header = `[Lines ${start + 1}-${end} of ${totalLines} total — ${args.path}]\n`
+      console.log(`[FilesystemTools] Read file chunk: ${args.path} lines ${start + 1}-${end}/${totalLines}`)
+      return { content: header + slice.join('\n'), isError: false }
+    }
+
+    console.log(`[FilesystemTools] Read file: ${args.path} (${raw.length} chars, ${totalLines} lines)`)
+    return { content: raw, isError: false }
   } catch (err) {
     return { content: `Error reading file: ${err instanceof Error ? err.message : String(err)}`, isError: true }
   }
@@ -224,6 +413,49 @@ function toolWriteFile(repoPaths: string[], args: { path: string; content: strin
   }
 }
 
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0
+  let idx = 0
+  while ((idx = haystack.indexOf(needle, idx)) !== -1) {
+    count++
+    idx += needle.length
+  }
+  return count
+}
+
+function tryFuzzyMatch(original: string, oldString: string): { matched: string; strategy: string } | null {
+  const trimmedOld = oldString.split('\n').map(l => l.trim()).join('\n')
+  const trimmedOriginal = original.split('\n').map(l => l.trim()).join('\n')
+  if (trimmedOriginal.includes(trimmedOld)) {
+    const origLines = original.split('\n')
+    const oldLines = oldString.split('\n').map(l => l.trim())
+    for (let i = 0; i <= origLines.length - oldLines.length; i++) {
+      const window = origLines.slice(i, i + oldLines.length)
+      if (window.every((line, j) => line.trim() === oldLines[j])) {
+        return { matched: window.join('\n'), strategy: 'whitespace-normalized' }
+      }
+    }
+  }
+
+  const normalizedOld = oldString.replace(/\s+/g, ' ').trim()
+  const normalizedOriginal = original.replace(/\s+/g, ' ').trim()
+  if (normalizedOriginal.includes(normalizedOld)) {
+    const startIdx = normalizedOriginal.indexOf(normalizedOld)
+    let charCount = 0
+    let realStart = 0
+    const collapsed = original.replace(/\s+/g, ' ').trim()
+    for (let i = 0; i < original.length && charCount < startIdx; i++) {
+      if (original[i] === collapsed[charCount]) charCount++
+      if (charCount === startIdx) { realStart = i + 1; break }
+    }
+    if (realStart > 0) {
+      return null
+    }
+  }
+
+  return null
+}
+
 function toolEditFile(repoPaths: string[], args: { path: string; old_string: string; new_string: string }): { content: string; isError: boolean } {
   try {
     const absPath = resolveSafePath(repoPaths, args.path)
@@ -239,51 +471,119 @@ function toolEditFile(repoPaths: string[], args: { path: string; old_string: str
 
     const original = readFileSync(absPath, 'utf-8')
 
-    if (!original.includes(args.old_string)) {
-      return { content: `old_string not found in "${args.path}". Make sure the search text matches exactly (including whitespace and indentation).`, isError: true }
+    if (original.includes(args.old_string)) {
+      const count = countOccurrences(original, args.old_string)
+      const updated = original.split(args.old_string).join(args.new_string)
+      writeFileSync(absPath, updated, 'utf-8')
+      console.log(`[FilesystemTools] Edited file: ${args.path} (${count} replacement${count > 1 ? 's' : ''})`)
+      return { content: `Successfully replaced ${count} occurrence${count > 1 ? 's' : ''} in ${args.path}`, isError: false }
     }
 
-    // Count occurrences
-    let count = 0
-    let idx = 0
-    while ((idx = original.indexOf(args.old_string, idx)) !== -1) {
-      count++
-      idx += args.old_string.length
+    const fuzzy = tryFuzzyMatch(original, args.old_string)
+    if (fuzzy) {
+      const count = countOccurrences(original, fuzzy.matched)
+      const updated = original.split(fuzzy.matched).join(args.new_string)
+      writeFileSync(absPath, updated, 'utf-8')
+      console.log(`[FilesystemTools] Edited file (${fuzzy.strategy}): ${args.path} (${count} replacement${count > 1 ? 's' : ''})`)
+      return {
+        content: `Successfully replaced ${count} occurrence${count > 1 ? 's' : ''} in ${args.path} (matched via ${fuzzy.strategy})`,
+        isError: false
+      }
     }
 
-    const updated = original.split(args.old_string).join(args.new_string)
-    writeFileSync(absPath, updated, 'utf-8')
+    const oldLines = args.old_string.split('\n')
+    const firstLine = oldLines[0].trim()
+    const lastLine = oldLines[oldLines.length - 1].trim()
+    const origLines = original.split('\n')
+    const hints: string[] = []
+    for (let i = 0; i < origLines.length; i++) {
+      if (origLines[i].trim().includes(firstLine.slice(0, 40))) {
+        hints.push(`  Line ${i + 1}: ${origLines[i].trim().slice(0, 80)}`)
+        if (hints.length >= 3) break
+      }
+    }
 
-    console.log(`[FilesystemTools] Edited file: ${args.path} (${count} replacement${count > 1 ? 's' : ''})`)
+    const hintText = hints.length > 0
+      ? `\n\nPossible matches found near:\n${hints.join('\n')}\n\nTip: Use cortex_read_file with offset+limit to see exact content around these lines, then retry with the exact text.`
+      : `\n\nThe first line of your search ("${firstLine.slice(0, 60)}") was not found anywhere in the file.`
+
     return {
-      content: `Successfully replaced ${count} occurrence${count > 1 ? 's' : ''} in ${args.path}`,
-      isError: false
+      content: `old_string not found in "${args.path}". Tried: exact match → whitespace-normalized match → both failed.${hintText}`,
+      isError: true
     }
   } catch (err) {
     return { content: `Error editing file: ${err instanceof Error ? err.message : String(err)}`, isError: true }
   }
 }
 
-function toolListDirectory(repoPaths: string[], args: { path?: string }): { content: string; isError: boolean } {
+function collectDirEntries(
+  absDir: string,
+  repoRoot: string,
+  prefix: string,
+  currentDepth: number,
+  maxDepth: number,
+  exts: Set<string> | null,
+  results: string[]
+): void {
+  if (currentDepth > maxDepth) return
+  let items: import('fs').Dirent[]
+  try {
+    items = readdirSync(absDir, { withFileTypes: true, encoding: 'utf-8' }) as import('fs').Dirent[]
+  } catch {
+    return
+  }
+
+  const sorted = [...items]
+    .filter(i => !String(i.name).startsWith('.') || i.name === '.env.example')
+    .sort((a, b) => {
+      if (a.isDirectory() && !b.isDirectory()) return -1
+      if (!a.isDirectory() && b.isDirectory()) return 1
+      return String(a.name).localeCompare(String(b.name))
+    })
+
+  for (const item of sorted) {
+    const name = String(item.name)
+    const indent = '  '.repeat(currentDepth)
+    if (item.isDirectory()) {
+      results.push(`${indent}${name}/`)
+      if (currentDepth < maxDepth) {
+        collectDirEntries(
+          resolve(absDir, name),
+          repoRoot,
+          prefix,
+          currentDepth + 1,
+          maxDepth,
+          exts,
+          results
+        )
+      }
+    } else {
+      if (exts && !exts.has(extname(name).toLowerCase())) continue
+      results.push(`${indent}${name}`)
+    }
+  }
+}
+
+function toolListDirectory(
+  repoPaths: string[],
+  args: { path?: string; recursive?: boolean; depth?: number; extensions?: string[] }
+): { content: string; isError: boolean } {
   try {
     const targetPath = args.path || '.'
+    const recursive = args.recursive ?? false
+    const maxDepth = recursive ? Math.min(Math.max(1, args.depth ?? 3), 10) : 1
+    const exts = args.extensions && args.extensions.length > 0
+      ? new Set(args.extensions.map(e => e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`))
+      : null
 
-    // Special case: if path is "." or empty, list ALL repo roots
     if (targetPath === '.' || targetPath === '') {
       const entries: string[] = []
       for (const repoRoot of repoPaths) {
         const repoName = repoRoot.split('/').pop() || repoRoot
-        try {
-          const items = readdirSync(repoRoot, { withFileTypes: true })
-          entries.push(`=== ${repoName} (${repoRoot}) ===`)
-          for (const item of items) {
-            if (item.name.startsWith('.') && item.name !== '.env.example') continue // skip hidden except .env.example
-            entries.push(item.isDirectory() ? `  ${item.name}/` : `  ${item.name}`)
-          }
-        } catch {
-          entries.push(`=== ${repoName} (${repoRoot}) === [unreadable]`)
-        }
+        entries.push(`=== ${repoName} (${repoRoot}) ===`)
+        collectDirEntries(repoRoot, repoRoot, '', 0, maxDepth, exts, entries)
       }
+      console.log(`[FilesystemTools] Listed all repos (recursive=${recursive}, depth=${maxDepth})`)
       return { content: entries.join('\n'), isError: false }
     }
 
@@ -298,23 +598,219 @@ function toolListDirectory(repoPaths: string[], args: { path?: string }): { cont
       return { content: `"${targetPath}" is a file, not a directory.`, isError: true }
     }
 
-    const items = readdirSync(absPath, { withFileTypes: true })
-    const lines = items
-      .filter(item => !item.name.startsWith('.') || item.name === '.env.example')
-      .map(item => item.isDirectory() ? `${item.name}/` : item.name)
-      .sort((a, b) => {
-        // Directories first
-        const aDir = a.endsWith('/')
-        const bDir = b.endsWith('/')
-        if (aDir && !bDir) return -1
-        if (!aDir && bDir) return 1
-        return a.localeCompare(b)
-      })
+    const lines: string[] = []
+    collectDirEntries(absPath, absPath, '', 0, maxDepth, exts, lines)
 
-    console.log(`[FilesystemTools] Listed directory: ${targetPath} (${lines.length} entries)`)
+    console.log(`[FilesystemTools] Listed: ${targetPath} (${lines.length} entries, recursive=${recursive})`)
     return { content: lines.join('\n') || '(empty directory)', isError: false }
   } catch (err) {
     return { content: `Error listing directory: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
+}
+
+async function toolReadFiles(
+  repoPaths: string[],
+  args: { paths: string[]; offset?: number; limit?: number }
+): Promise<{ content: string; isError: boolean }> {
+  if (!Array.isArray(args.paths) || args.paths.length === 0) {
+    return { content: 'paths array is required and must not be empty', isError: true }
+  }
+  if (args.paths.length > MAX_BATCH_FILES) {
+    return { content: `Too many files requested (${args.paths.length}). Maximum: ${MAX_BATCH_FILES} per call.`, isError: true }
+  }
+
+  const readResults = await Promise.all(
+    args.paths.map(async (filePath) => {
+      const result = await toolReadFile(repoPaths, { path: filePath, offset: args.offset, limit: args.limit })
+      return { filePath, result }
+    })
+  )
+
+  const outputs: string[] = []
+  let hasError = false
+
+  for (const { filePath, result } of readResults) {
+    if (result.isError) {
+      outputs.push(`=== ${filePath} [ERROR] ===\n${result.content}`)
+      hasError = true
+    } else {
+      outputs.push(`=== ${filePath} ===\n${result.content}`)
+    }
+  }
+
+  console.log(`[FilesystemTools] Batch read ${args.paths.length} files in parallel`)
+  return { content: outputs.join('\n\n'), isError: hasError }
+}
+
+function toolGrepSearch(
+  repoPaths: string[],
+  args: { pattern: string; directory?: string; extensions?: string[]; max_results?: number; case_sensitive?: boolean }
+): { content: string; isError: boolean } {
+  try {
+    const maxResults = Math.min(args.max_results ?? 50, MAX_GREP_RESULTS)
+    const caseSensitive = args.case_sensitive ?? false
+    const exts = args.extensions && args.extensions.length > 0
+      ? new Set(args.extensions.map(e => e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`))
+      : null
+
+    let regex: RegExp
+    try {
+      regex = new RegExp(args.pattern, caseSensitive ? 'g' : 'gi')
+    } catch {
+      return { content: `Invalid regex pattern: ${args.pattern}`, isError: true }
+    }
+
+    const searchRoots = args.directory
+      ? [resolveSafePath(repoPaths, args.directory)]
+      : repoPaths
+
+    const matches: string[] = []
+    let totalScanned = 0
+
+    function searchDir(dirPath: string): void {
+      if (matches.length >= maxResults) return
+      let items: import('fs').Dirent[]
+      try {
+        items = readdirSync(dirPath, { withFileTypes: true, encoding: 'utf-8' }) as import('fs').Dirent[]
+      } catch {
+        return
+      }
+
+      for (const item of items) {
+        if (matches.length >= maxResults) return
+        const name = String(item.name)
+        if (name.startsWith('.') || name === 'node_modules' || name === 'dist' || name === '.git') continue
+
+        const absItem = resolve(dirPath, name)
+        if (item.isDirectory()) {
+          searchDir(absItem)
+        } else if (item.isFile()) {
+          const ext = extname(name).toLowerCase()
+          if (BINARY_EXTENSIONS.has(ext)) continue
+          if (exts && !exts.has(ext)) continue
+
+          let content: string
+          try {
+            const stat = statSync(absItem)
+            if (stat.size > MAX_READ_SIZE) return
+            content = readFileSync(absItem, 'utf-8')
+            if (content.slice(0, 8192).includes('\0')) return
+          } catch {
+            return
+          }
+
+          totalScanned++
+          const lines = content.split('\n')
+          for (let i = 0; i < lines.length; i++) {
+            if (matches.length >= maxResults) break
+            regex.lastIndex = 0
+            if (regex.test(lines[i])) {
+              const relPath = (() => {
+                for (const root of repoPaths) {
+                  if (absItem.startsWith(resolve(root))) return relative(resolve(root), absItem)
+                }
+                return absItem
+              })()
+              matches.push(`${relPath}:${i + 1}: ${lines[i].trim()}`)
+            }
+          }
+        }
+      }
+    }
+
+    for (const root of searchRoots) {
+      if (!existsSync(root)) continue
+      searchDir(root)
+    }
+
+    const header = `Found ${matches.length} match${matches.length !== 1 ? 'es' : ''} in ${totalScanned} files scanned (pattern: "${args.pattern}"):`
+    console.log(`[FilesystemTools] Grep: "${args.pattern}" → ${matches.length} matches in ${totalScanned} files`)
+    return {
+      content: matches.length > 0 ? `${header}\n\n${matches.join('\n')}` : `${header}\n\n(no matches)`,
+      isError: false
+    }
+  } catch (err) {
+    return { content: `Error during grep: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
+}
+
+function toolEditFiles(
+  repoPaths: string[],
+  args: { edits: Array<{ path: string; old_string: string; new_string: string }> }
+): { content: string; isError: boolean } {
+  if (!Array.isArray(args.edits) || args.edits.length === 0) {
+    return { content: 'edits array is required and must not be empty', isError: true }
+  }
+
+  const results: string[] = []
+  let hasError = false
+
+  for (const edit of args.edits) {
+    const result = toolEditFile(repoPaths, edit)
+    if (result.isError) {
+      results.push(`[FAILED] ${edit.path}: ${result.content}`)
+      hasError = true
+    } else {
+      results.push(`[OK] ${result.content}`)
+    }
+  }
+
+  const succeeded = results.filter(r => r.startsWith('[OK]')).length
+  const summary = `${succeeded}/${args.edits.length} edits applied successfully.`
+  return { content: `${summary}\n\n${results.join('\n')}`, isError: hasError }
+}
+
+function toolMoveFile(
+  repoPaths: string[],
+  args: { source: string; destination: string }
+): { content: string; isError: boolean } {
+  try {
+    const srcAbs = resolveSafePath(repoPaths, args.source)
+    const dstAbs = resolveSafePath(repoPaths, args.destination)
+
+    if (!existsSync(srcAbs)) {
+      return { content: `Source not found: ${args.source}`, isError: true }
+    }
+    if (existsSync(dstAbs)) {
+      return { content: `Destination already exists: ${args.destination}. Delete it first if you want to overwrite.`, isError: true }
+    }
+
+    const dstDir = dirname(dstAbs)
+    if (!existsSync(dstDir)) {
+      mkdirSync(dstDir, { recursive: true })
+    }
+
+    renameSync(srcAbs, dstAbs)
+    console.log(`[FilesystemTools] Moved: ${args.source} → ${args.destination}`)
+    return { content: `Successfully moved ${args.source} → ${args.destination}`, isError: false }
+  } catch (err) {
+    return { content: `Error moving file: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
+}
+
+function toolDeleteFile(
+  repoPaths: string[],
+  args: { path: string }
+): { content: string; isError: boolean } {
+  try {
+    const absPath = resolveSafePath(repoPaths, args.path)
+
+    if (!existsSync(absPath)) {
+      return { content: `Not found: ${args.path}`, isError: true }
+    }
+
+    const stat = statSync(absPath)
+    if (stat.isDirectory()) {
+      rmdirSync(absPath)
+      console.log(`[FilesystemTools] Deleted directory: ${args.path}`)
+      return { content: `Successfully deleted directory: ${args.path}`, isError: false }
+    }
+
+    unlinkSync(absPath)
+    console.log(`[FilesystemTools] Deleted file: ${args.path}`)
+    return { content: `Successfully deleted: ${args.path}`, isError: false }
+  } catch (err) {
+    return { content: `Error deleting: ${err instanceof Error ? err.message : String(err)}`, isError: true }
   }
 }
 
@@ -361,7 +857,7 @@ export async function executeBuiltinTool(
 
   switch (toolName) {
     case 'cortex_read_file':
-      return toolReadFile(repoPaths, args as { path: string })
+      return toolReadFile(repoPaths, args as { path: string; offset?: number; limit?: number })
 
     case 'cortex_write_file':
       return toolWriteFile(repoPaths, args as { path: string; content: string })
@@ -370,7 +866,22 @@ export async function executeBuiltinTool(
       return toolEditFile(repoPaths, args as { path: string; old_string: string; new_string: string })
 
     case 'cortex_list_directory':
-      return toolListDirectory(repoPaths, args as { path?: string })
+      return toolListDirectory(repoPaths, args as { path?: string; recursive?: boolean; depth?: number; extensions?: string[] })
+
+    case 'cortex_read_files':
+      return toolReadFiles(repoPaths, args as { paths: string[]; offset?: number; limit?: number })
+
+    case 'cortex_grep_search':
+      return toolGrepSearch(repoPaths, args as { pattern: string; directory?: string; extensions?: string[]; max_results?: number; case_sensitive?: boolean })
+
+    case 'cortex_edit_files':
+      return toolEditFiles(repoPaths, args as { edits: Array<{ path: string; old_string: string; new_string: string }> })
+
+    case 'cortex_move_file':
+      return toolMoveFile(repoPaths, args as { source: string; destination: string })
+
+    case 'cortex_delete_file':
+      return toolDeleteFile(repoPaths, args as { path: string })
 
     default:
       return { content: `Unknown builtin tool: ${toolName}`, isError: true }
