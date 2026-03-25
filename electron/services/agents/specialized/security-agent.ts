@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const securityAgent: AgentDefinition = {
   role: 'security',
   name: 'Security Auditor',
   description: 'Identifies security vulnerabilities, injection risks, and authentication issues',
-  systemPrompt: `You are a Security Auditor specialist. Your job is to identify security vulnerabilities and suggest fixes.
+  systemPrompt: `${CORE_POLICIES}
+
+You are a Security Auditor specialist. Your job is to identify security vulnerabilities and suggest fixes.
 
 FOCUS AREAS:
 - SQL injection, XSS, CSRF vulnerabilities

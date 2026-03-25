@@ -36,6 +36,8 @@ import {
   clearProjectAtlassianConfig, hasProjectAtlassianConfig
 } from './services/atlassian-config-service'
 import { recordFeedbackSignal, convertSignalsToTrainingPairs, getFeedbackStats } from './services/feedback-collector'
+import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig } from './services/skills/learning/autoscan-engine'
+import { initTrainingEngine, shutdownTrainingEngine, triggerManualTraining } from './services/training/training-engine'
 import { trainFromPairs, getLearnedWeightCount } from './services/learned-reranker'
 import { initDefaultVariant } from './services/query-optimizer'
 import { estimateTokens } from './services/context-compressor'
@@ -650,8 +652,18 @@ CRITICAL: You MUST use tools when the user's request matches these patterns:
 - "Phân tích ảnh", "analyze image", "đọc ảnh" → MUST call cortex_analyze_image
 - "Bao nhiêu người", "contributors", "team" → MUST call cortex_git_contributors
 - "Tìm config", "env var", "setting" → MUST call cortex_search_config
+- "Đọc file PDF/DOCX/XLSX/CSV", "read document", "mở file" → MUST call cortex_read_document
 - Questions about code patterns → MUST call cortex_code_advisor or cortex_find_similar_code
-NEVER respond with "tôi không có khả năng" when you have tools available. CHECK your tool list first.`
+NEVER respond with "tôi không có khả năng" when you have tools available. CHECK your tool list first.
+
+[core-behaviour]
+The following foundational policies govern ALL your actions (distilled from Claude Code, Cursor, Devin, Windsurf):
+- Work until COMPLETE — do not stop mid-task, do not ask permission to continue
+- NEVER guess file contents or API signatures — use cortex_read_file or cortex_grep_search to investigate
+- Call all independent tools SIMULTANEOUSLY in one response, not sequentially
+- Match the existing codebase's style, naming, and patterns exactly
+- When uncertain: investigate with tools FIRST, ask user only when tools yield nothing
+- Respond with exactly what is needed — no preamble, no apology, no filler`
 
         const AGENT_MODE_CONFIGS: Record<string, { systemPrompt: string; modeDirectives: string }> = {
           sisyphus: {
@@ -3016,12 +3028,26 @@ Return ONLY the enhanced prompt, nothing else.`
     return getDelegationHistory(fromAgent as Parameters<typeof getDelegationHistory>[0])
   })
 
+  initTrainingEngine(mainWindow)
+
+  ipcMain.handle('autoscan:progress', () => getAutoScanProgress())
+  ipcMain.handle('autoscan:config:get', () => getAutoScanConfig())
+  ipcMain.handle('autoscan:config:set', (_event, config: Record<string, unknown>) => {
+    setAutoScanConfig(config)
+    return true
+  })
+  ipcMain.handle('autoscan:trigger', (_event, projectId: string) => {
+    triggerManualTraining('autoscan', projectId)
+    return true
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
   app.on('before-quit', async () => {
     clearInterval(autoTrainTimer)
+    shutdownTrainingEngine()
     stopAllWatchers()
     await shutdownAllMCP().catch(err => console.error('[Main] MCP shutdown failed:', err))
     await shutdownAll().catch(err => console.error('[Main] Skill shutdown failed:', err))

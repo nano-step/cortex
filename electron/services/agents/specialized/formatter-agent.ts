@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const formatterAgent: AgentDefinition = {
   role: 'formatter',
   name: 'Output Formatter',
   description: 'Ensures consistent formatting, markdown structure, and readability',
-  systemPrompt: `You are the Output Formatter. Your job is to ensure responses are well-formatted and readable.
+  systemPrompt: `${CORE_POLICIES}
+
+You are the Output Formatter. Your job is to ensure responses are well-formatted and readable.
 
 RULES:
 - Ensure proper markdown formatting (headings, lists, code blocks, tables)

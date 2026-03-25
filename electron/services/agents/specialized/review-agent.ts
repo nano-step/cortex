@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const reviewAgent: AgentDefinition = {
   role: 'review',
   name: 'Code Reviewer',
   description: 'Reviews code quality, patterns, maintainability, and best practices',
-  systemPrompt: `You are a Senior Code Reviewer. Your job is to review code for quality, patterns, and maintainability.
+  systemPrompt: `${CORE_POLICIES}
+
+You are a Senior Code Reviewer. Your job is to review code for quality, patterns, and maintainability.
 
 FOCUS AREAS:
 - Code readability and naming conventions

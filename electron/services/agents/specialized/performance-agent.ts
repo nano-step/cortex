@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const performanceAgent: AgentDefinition = {
   role: 'performance',
   name: 'Performance Analyzer',
   description: 'Analyzes code for performance bottlenecks, memory leaks, and optimization opportunities',
-  systemPrompt: `You are a Performance Analysis specialist. Your job is to identify performance issues in code and suggest optimizations.
+  systemPrompt: `${CORE_POLICIES}
+
+You are a Performance Analysis specialist. Your job is to identify performance issues in code and suggest optimizations.
 
 FOCUS AREAS:
 - Time complexity of algorithms

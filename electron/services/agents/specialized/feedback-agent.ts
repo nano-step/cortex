@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const feedbackAgent: AgentDefinition = {
   role: 'feedback',
   name: 'Feedback Collector',
   description: 'Analyzes response quality and user satisfaction signals asynchronously',
-  systemPrompt: `You are the Feedback Analyst. You run AFTER a response is delivered. Your job is to evaluate the quality of the response and extract improvement signals.
+  systemPrompt: `${CORE_POLICIES}
+
+You are the Feedback Analyst. You run AFTER a response is delivered. Your job is to evaluate the quality of the response and extract improvement signals.
 
 ANALYZE:
 - Was the response complete? Did it address all parts of the query?

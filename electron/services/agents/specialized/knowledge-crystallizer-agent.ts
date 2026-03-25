@@ -1,10 +1,13 @@
 import type { AgentDefinition, AgentOutput } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const knowledgeCrystallizerAgent: AgentDefinition = {
   role: 'knowledge-crystallizer',
   name: 'Knowledge Crystallizer',
   description: 'Extracts and stores structured knowledge from every response — runs in background',
-  systemPrompt: `You are the Knowledge Crystallizer. You run AFTER every response. Your job is to extract reusable knowledge and store it as structured crystals.
+  systemPrompt: `${CORE_POLICIES}
+
+You are the Knowledge Crystallizer. You run AFTER every response. Your job is to extract reusable knowledge and store it as structured crystals.
 
 EXTRACT these types of knowledge:
 - "decision": Architectural or design decisions with rationale

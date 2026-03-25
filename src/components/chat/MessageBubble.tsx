@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import mermaid from 'mermaid'
-import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText, Download, Maximize2, X } from 'lucide-react'
+import { Brain, User, Copy, Check, FolderTree, ThumbsUp, ThumbsDown, FileText, Download, Maximize2, X, BookOpen } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { Message } from '../../types'
 import { TypingIndicator } from './TypingIndicator'
@@ -604,9 +604,57 @@ function cortexUrlTransform(url: string): string {
   return ''
 }
 
+const DOC_EXTENSION_ICONS: Record<string, string> = {
+  pdf: '📄', docx: '📝', xlsx: '📊', xls: '📊', csv: '📋', html: '🌐', htm: '🌐'
+}
+
+function DocumentMetadataHeader({ headerLine, metaLine }: { headerLine: string; metaLine?: string }) {
+  const fileMatch = headerLine.match(/\[Document:\s*(.+?)\]/)
+  if (!fileMatch) return null
+  const filePath = fileMatch[1].trim()
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  const icon = DOC_EXTENSION_ICONS[ext] ?? '📄'
+  const fileName = filePath.split('/').pop() ?? filePath
+  const metaParts = metaLine ? metaLine.split(' | ').map(p => p.trim()).filter(Boolean) : []
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3 p-2.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+      <BookOpen size={14} className="text-[var(--accent-primary)] shrink-0" />
+      <span className="text-[12px] font-medium text-[var(--text-primary)] truncate max-w-[200px]" title={filePath}>
+        {icon} {fileName}
+      </span>
+      {metaParts.map((part, i) => (
+        <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--accent-light)] text-[var(--accent-primary)] font-medium shrink-0">
+          {part}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function ContentWithImages({ content }: { content: string }) {
   const imgMatch = content.match(/\[CORTEX_IMG:([^\]]+)\]/)
-  if (!imgMatch) return <MemoizedMarkdown content={content} />
+  if (!imgMatch) {
+    const docHeaderMatch = content.match(/^\[Document:\s*.+?\]\n(.+?)\n\n([\s\S]*)$/)
+    if (docHeaderMatch) {
+      return (
+        <>
+          <DocumentMetadataHeader headerLine={content.split('\n')[0]} metaLine={docHeaderMatch[1]} />
+          <MemoizedMarkdown content={docHeaderMatch[2]} />
+        </>
+      )
+    }
+    const docSimpleMatch = content.match(/^\[Document:\s*.+?\]\n\n([\s\S]*)$/)
+    if (docSimpleMatch) {
+      return (
+        <>
+          <DocumentMetadataHeader headerLine={content.split('\n')[0]} />
+          <MemoizedMarkdown content={docSimpleMatch[1]} />
+        </>
+      )
+    }
+    return <MemoizedMarkdown content={content} />
+  }
 
   const imgPath = imgMatch[1]
   const textWithoutImg = content.replace(/\[CORTEX_IMG:[^\]]+\]\n*/g, '').trim()

@@ -35,9 +35,23 @@ class PdfConverter implements DocumentConverter {
   async convert(filePath: string, info: StreamInfo): Promise<DocumentConverterResult> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string; numpages: number; info: Record<string, string> }>
+      const { PDFParse } = require('pdf-parse') as {
+        PDFParse: new (opts: { data: Buffer }) => {
+          getText(params?: Record<string, unknown>): Promise<{ text: string; total: number }>
+          getInfo(params?: Record<string, unknown>): Promise<{ info: Record<string, string> }>
+        }
+      }
       const buffer = readFileSync(filePath)
-      const data = await pdfParse(buffer)
+      const parser = new PDFParse({ data: buffer })
+      const [textResult, infoResult] = await Promise.all([
+        parser.getText(),
+        parser.getInfo().catch(() => ({ info: {} as Record<string, string> }))
+      ])
+      const data = {
+        text: textResult.text,
+        numpages: textResult.total,
+        info: infoResult.info as Record<string, string>
+      }
 
       const lines = data.text.split('\n')
       const cleaned = lines
@@ -148,6 +162,31 @@ class XlsxConverter implements DocumentConverter {
   }
 }
 
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  fields.push(current.trim())
+  return fields
+}
+
 class CsvConverter implements DocumentConverter {
   readonly priority = 0
 
@@ -164,11 +203,11 @@ class CsvConverter implements DocumentConverter {
         return { markdown: '(empty CSV)', metadata: { sourceFormat: 'csv', filename: info.filename } }
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+      const headers = parseCsvLine(lines[0])
       const headerRow = `| ${headers.join(' | ')} |`
       const separatorRow = `| ${headers.map(() => '---').join(' | ')} |`
       const dataRows = lines.slice(1).map(line => {
-        const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''))
+        const cols = parseCsvLine(line)
         while (cols.length < headers.length) cols.push('')
         return `| ${cols.join(' | ')} |`
       })

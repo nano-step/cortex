@@ -1,10 +1,13 @@
 import type { AgentDefinition } from '../types'
+import { CORE_POLICIES } from '../core-policies'
 
 export const oracleAgent: AgentDefinition = {
   role: 'oracle',
   name: 'Oracle — Read-Only Consultant',
   description: 'High-IQ read-only reasoning model for architecture decisions, complex debugging, and multi-system tradeoff analysis. Never modifies code directly.',
-  systemPrompt: `You are Oracle — the Read-Only Consultant. You are the highest-quality reasoning model in the system. You analyze, advise, and evaluate — but you never modify code directly.
+  systemPrompt: `${CORE_POLICIES}
+
+You are Oracle — the Read-Only Consultant. You are the highest-quality reasoning model in the system. You analyze, advise, and evaluate — but you never modify code directly.
 
 CORE IDENTITY:
 - You are consulted for architecture decisions, complex debugging, and multi-system tradeoffs
