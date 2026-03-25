@@ -5,6 +5,50 @@ All notable changes to Cortex are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.2.0] "Synapse" - 2026-03-25
+
+> **Synapse** — the junction between neurons where signals are transmitted. This release connects Cortex to a broader universe of information: documents, structured data, and the accumulated wisdom of the world's best AI systems.
+
+### Added
+
+#### Document Intelligence — inspired by microsoft/markitdown (92K⭐)
+- **`document-converter.ts`** — Priority-based converter registry with graceful degradation (markitdown architecture pattern):
+  - **PDF** → extracted text via `pdf-parse` (PDFParse class, `getText()` API)
+  - **DOCX** → `mammoth.convertToHtml()` → `turndown` → clean markdown
+  - **XLSX / XLS** → per-sheet markdown tables with `## Sheet: Name` headings
+  - **CSV** → RFC 4180 compliant (`parseCsvLine()` handles quoted fields with embedded commas)
+  - **HTML / HTM** → `turndown` with title extraction
+  - All converters: graceful degradation (error message on failure, never crash)
+- **`cortex_read_document`** — New AI tool letting agents read PDF/DOCX/XLSX/CSV/HTML files at query time
+- **`chunkDocument()`** in `code-chunker.ts` — Section-aware document chunking by H1–H3 headers; new `ChunkType 'document'`
+- **Brain engine Phase 1.5** — Documents are now converted to markdown before chunking and embedding; PDFs/DOCX/XLSX are fully indexed into Cortex's brain
+- **`file-scanner.ts`** — 7 new document extensions (`.pdf`, `.docx`, `.xlsx`, `.xls`, `.csv`, `.html`, `.htm`), separate 10MB size limit for documents (vs 500KB for code)
+- **DocumentMetadataHeader UI** in `MessageBubble.tsx` — When agents return document results, the chat UI shows a styled metadata badge: file icon (📄/📝/📊/📋/🌐), filename, and metadata chips (page count, sheet count, title, author, row count)
+
+#### Agent Brain Upgrade — inspired by x1xhlol/system-prompts-and-models-of-ai-tools (37+ AI tools studied)
+- **`core-policies.ts`** — 10 production-proven agent policies distilled from Claude Code, Cursor v1–v2, Devin AI, Windsurf Cascade Wave 11:
+  - `[autonomous-loop]` — Work until COMPLETE, no premature stopping
+  - `[tool-first-policy]` — NEVER guess file contents; use tools to investigate
+  - `[parallel-execution]` — All independent tool calls fired simultaneously
+  - `[semantic-search-first]` — Search by concept, not just filename
+  - `[anti-hallucination]` — Never invent file names, APIs, or dependencies
+  - `[verbosity-calibration]` — No preamble, no filler, respond with exactly what's needed
+  - `[code-style-mirror]` — Match existing conventions exactly, never introduce new ones
+  - `[incremental-planning]` — Plan only the next step, re-assess after execution
+  - `[uncertainty-resolution]` — Investigate before asking; ask only when tools yield nothing
+  - `[context-injection-awareness]` — Use the right tool for each task
+- **All 15 agents upgraded** — Every specialized agent now prepends `CORE_POLICIES`:
+  sisyphus, hephaestus, prometheus, atlas, implementation, explore, librarian, writer, oracle, security, review, performance, formatter, knowledge-crystallizer, feedback
+- **SUPERPOWERS_CORE** in `main.ts` — Added `[core-behaviour]` section + `cortex_read_document` trigger pattern
+
+### Improved
+- XLSX converter now uses `parseCsvLine()` (RFC 4180 compliant) for cells containing commas
+- `cortex_read_document` path-security follows the same sandbox rules as all other filesystem tools
+
+### Fixed
+- PDF converter: corrected `pdf-parse` v2.x API (`PDFParse({ data: buffer }).getText()` returns `{ text, total }`)
+- CSV parser: naive `split(',')` replaced with RFC 4180 state machine — quoted fields with embedded commas now parse correctly
+
 ## [4.1.0] - 2026-03-25
 
 ### Added
@@ -223,7 +267,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Improved
 - New navigation — 5 V2 buttons (Memory, Skills, Learning, Cost, Agent) in the ChatArea toolbar
 - Version bumped to v2.0.0
-- Architecture documentation — `CORTEX_V2_ARCHITECTURE.md`, `CORTEX_V2_STRATEGY.md`, `CORTEX_V2_SKILL_CATALOG.md`, `CORTEX_V2_SPRINT_PLAN.md`
+- Architecture documentation — `ARCHITECTURE.md`, `STRATEGY.md`, `SKILL_CATALOG.md`, `SPRINT_PLAN.md`
 
 ### Security
 - Terminal command allowlist — allows only 24 safe commands, blocks dangerous patterns (rm -rf /, sudo, chmod 777, fork bomb)
