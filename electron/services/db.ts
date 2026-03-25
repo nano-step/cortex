@@ -82,6 +82,28 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_chunks_branch ON chunks(branch)`,
     ]
   },
+  {
+    version: 4,
+    description: 'Expand training_pairs source constraint to include autoscan',
+    sql: [
+      `CREATE TABLE IF NOT EXISTS training_pairs_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        query TEXT NOT NULL,
+        chunk_id TEXT NOT NULL,
+        label REAL NOT NULL CHECK(label >= -1.0 AND label <= 1.0),
+        source TEXT NOT NULL CHECK(source IN ('thumbs_up', 'thumbs_down', 'copy', 'implicit_positive', 'implicit_negative', 'autoscan')),
+        weight REAL NOT NULL DEFAULT 1.0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      )`,
+      `INSERT OR IGNORE INTO training_pairs_new SELECT * FROM training_pairs`,
+      `DROP TABLE IF EXISTS training_pairs`,
+      `ALTER TABLE training_pairs_new RENAME TO training_pairs`,
+      `CREATE INDEX IF NOT EXISTS idx_training_project ON training_pairs(project_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_training_chunk ON training_pairs(chunk_id)`,
+    ],
+    disableForeignKeys: true
+  },
 ]
 
 function runMigrations(database: Database.Database): void {
