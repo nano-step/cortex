@@ -130,13 +130,13 @@ class XlsxConverter implements DocumentConverter {
 
         if (rows.length === 0) continue
 
-        const headers = rows[0].split(',').map(h => h.trim())
+        const headers = parseCsvLine(rows[0])
         const dataRows = rows.slice(1)
 
         const headerRow = `| ${headers.join(' | ')} |`
         const separatorRow = `| ${headers.map(() => '---').join(' | ')} |`
         const tableRows = dataRows.map(row => {
-          const cols = row.split(',').map(c => c.trim())
+          const cols = parseCsvLine(row)
           while (cols.length < headers.length) cols.push('')
           return `| ${cols.join(' | ')} |`
         })
