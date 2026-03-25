@@ -1,7 +1,7 @@
 # CORTEX v2.0 — TECHNICAL ARCHITECTURE
-## Kien Truc Ky Thuat Chi Tiet
+## Detailed Technical Architecture
 
-**Ngay tao:** 03/03/2026
+**Created:** 03/03/2026
 
 ---
 
@@ -106,7 +106,7 @@ interface CortexSkill {
   getMetrics(): SkillMetrics;
 }
 
-// Skill co the goi skill khac qua SkillContext
+// Skills can call other skills via SkillContext
 interface SkillContext {
   invokeSkill(skillName: string, input: SkillInput): Promise<SkillOutput>;
   getMemory(): MemoryManager;
@@ -187,26 +187,26 @@ User Query
 
 ```
 +============================+
-|     CORE MEMORY            |  <-- Luon trong system prompt (~2000 tokens)
+|     CORE MEMORY            |  <-- Always in system prompt (~2000 tokens)
 |  +----------------------+  |
-|  | user_profile:        |  |  - Coding style, language, preferences
-|  |   'Senior TS dev,    |  |  - Updated by agent khi hoc duoc gi moi
+  |  | user_profile:        |  |  - Coding style, language, preferences
+  |  |   'Senior TS dev,    |  |  - Updated by agent when new things are learned
 |  |    prefers functional |  |
-|  |    style, Vietnamese' |  |
+  |  |    style, English'   |  |
 |  +----------------------+  |
 |  | project_context:     |  |  - Project tech stack, architecture
 |  |   'Electron + React, |  |  - Key decisions, conventions
 |  |    ChromaDB, SQLite'  |  |
 |  +----------------------+  |
-|  | preferences:         |  |  - Response format, detail level
-|  |   'Detailed code     |  |  - Auto-updated from behavior
-|  |    examples, Vi lang' |  |
+  |  | preferences:         |  |  - Response format, detail level
+  |  |   'Detailed code     |  |  - Auto-updated from behavior
+  |  |    examples, English' |  |
 |  +----------------------+  |
 +============================+
             |
             v
 +============================+
-|     ARCHIVAL MEMORY        |  <-- Long-term, vector-searchable, unlimited
+|     ARCHIVAL MEMORY        |  <-- Long-term, vector-searchable, unlimited size
 |  +----------------------+  |
 |  | Past decisions       |  |  - 'We chose ChromaDB because...'
 |  | Code patterns found  |  |  - 'Auth uses middleware pattern...'
@@ -230,13 +230,13 @@ User Query
 +============================+
 ```
 
-### 3.2 Memory trong Query Pipeline
+### 3.2 Memory in Query Pipeline
 
 ```
 Query arrives
     |
     v
-[1] Load Core Memory --> inject vao system prompt
+[1] Load Core Memory --> inject into system prompt
     |
     v
 [2] Search Archival Memory --> query relevant past decisions
@@ -250,13 +250,13 @@ Query arrives
 [4] Compose Context = Core + Archival results + Recall + Retrieved code
     |
     v
-[5] LLM call voi full context
+[5] LLM call with full context
     |
     v
 [6] Post-response:
     |   - Save to Recall Memory
-    |   - Agent co the update Core Memory (self-edit)
-    |   - Agent co the archive important info
+    |   - Agent can update Core Memory (self-edit)
+    |   - Agent can archive important info
 ```
 
 ---
@@ -288,8 +288,10 @@ User Query
                            (multi-query + RRF merge)
 ```
 
-### 4.2 Knowledge Graph cho Code
+### 4.2 Knowledge Graph for Code
 
+```
+Nodes:                        Edges:
 ```
 Nodes:                        Edges:
 +--------+                    +------------------+
@@ -309,9 +311,9 @@ Nodes:                        Edges:
 +--------+                    +------------------+
 ```
 
-**Entity extraction dung Tree-sitter:**
-- File nodes: moi file la 1 node
-- Function nodes: extract functions/methods tu AST
+**Entity extraction using Tree-sitter:**
+- File nodes: each file is one node
+- Function nodes: extract functions/methods from AST
 - Class nodes: extract classes/interfaces
 - Edge detection: import statements, function calls, class inheritance
 
@@ -342,7 +344,7 @@ User interaction
     +-- [DSPy Optimizer]
     |   Input: query-response pairs + accept/reject labels
     |   Output: optimized prompts
-    |   Schedule: every 100 new events hoac weekly
+    |   Schedule: every 100 new events or weekly
     |
     +-- [Reranker Updater]
     |   Input: query + chunks used + accept/reject
@@ -460,7 +462,7 @@ const MODEL_REGISTRY: ModelRoute[] = [
 ## 7. Database Schema (Complete)
 
 ```sql
--- ============ EXISTING (giu nguyen) ============
+-- ============ EXISTING (keep as-is) ============
 -- projects, repositories, conversations, messages, chunks, settings
 
 -- ============ NEW: Memory System ============
@@ -697,21 +699,21 @@ tests/
 
 ## 9. Security Architecture
 
-### Existing (giu nguyen va nang cap)
+### Existing (keep and upgrade)
 - contextIsolation: true, nodeIntegration: false
-- Electron safeStorage cho API keys
+- Electron safeStorage for API keys
 - Prompt injection detection (15+ regex patterns)
-- Audit trail cho moi action
+- Audit trail for all actions
 - Memory isolation per project
 
-### New Security cho v2.0
-- **Skill Sandboxing:** Moi skill chay trong sandbox, khong truc tiep access file system
-- **MCP Token Validation:** Validate tokens truoc khi connect MCP servers
-- **Memory Sanitization:** Clean input truoc khi luu vao memory
-- **Code Execution Sandbox:** Docker container voi no-network, limited CPU/RAM
-- **Cost Budget Enforcement:** Hard cap per query va per day de chong runaway costs
-- **Behavioral Data Privacy:** Events chi chua metadata, khong chua raw code
+### New Security for v2.0
+- **Skill Sandboxing:** Each skill runs in a sandbox with no direct file system access
+- **MCP Token Validation:** Validates tokens before connecting to MCP servers
+- **Memory Sanitization:** Cleans input before writing to memory
+- **Code Execution Sandbox:** Docker container with no-network, limited CPU/RAM
+- **Cost Budget Enforcement:** Hard cap per query and per day to prevent runaway costs
+- **Behavioral Data Privacy:** Events contain only metadata, never raw code
 
 ---
 
-*Xem them: CORTEX_V2_STRATEGY.md, CORTEX_V2_SKILL_CATALOG.md, CORTEX_V2_SPRINT_PLAN.md*
+*See also: CORTEX_V2_STRATEGY.md, CORTEX_V2_SKILL_CATALOG.md, CORTEX_V2_SPRINT_PLAN.md*

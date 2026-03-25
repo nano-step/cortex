@@ -1,14 +1,14 @@
 # CORTEX v2.0 — SKILL CATALOG
-## Danh Muc Ky Nang AI Toan Dien
+## Comprehensive AI Skill Catalog
 
-**Ngay tao:** 03/03/2026
-**Tong so skills:** 51 skills / 8 categories
+**Created:** 03/03/2026
+**Total skills:** 51 skills / 8 categories
 
 ---
 
 ## Skill Interface Contract (Base)
 
-Moi skill trong Cortex PHAI implement interface sau:
+Every skill in Cortex MUST implement the following interface:
 
 ```typescript
 type SkillCategory = 'rag' | 'memory' | 'agent' | 'code' | 'learning' | 'efficiency' | 'reasoning' | 'tool';
@@ -84,18 +84,18 @@ interface CortexSkill {
 ### 1.1 GraphRAG — Knowledge Graph + Vector Search
 
 **Priority:** P0
-**Effort:** 2 tuan
+**Effort:** 2 weeks
 **File:** `electron/services/skills/rag/graphrag-skill.ts`
 
-**Mo ta:** Ket hop knowledge graph voi vector search de tra loi cau hoi multi-hop. Thay vi chi search vector (tim chunks giong nhau), GraphRAG xay dung do thi quan he giua cac entities trong code (files, functions, classes, modules) va traverse do thi de tim cau tra loi.
+**Description:** Combines a knowledge graph with vector search to answer multi-hop questions. Instead of only searching vectors (finding similar chunks), GraphRAG builds a relationship graph between code entities (files, functions, classes, modules) and traverses it to find answers.
 
-**Cach hoat dong:**
-1. **Entity Extraction:** Dung LLM + Tree-sitter de extract entities tu code (functions, classes, imports, exports)
-2. **Relationship Mapping:** Xay dung edges: imports, calls, inherits, implements, uses
-3. **Graph Storage:** Luu graph trong SQLite voi tables: graph_nodes, graph_edges
-4. **Embedding:** Embed moi node voi context (file path + code + relationships)
-5. **Query:** Khi user hoi, tim start nodes bang vector search, roi traverse graph de expand context
-6. **Fusion:** Ket hop graph results + vector results bang Reciprocal Rank Fusion
+**How it works:**
+1. **Entity Extraction:** Uses LLM + Tree-sitter to extract entities from code (functions, classes, imports, exports)
+2. **Relationship Mapping:** Builds edges: imports, calls, inherits, implements, uses
+3. **Graph Storage:** Stores graph in SQLite with tables: graph_nodes, graph_edges
+4. **Embedding:** Embeds each node with context (file path + code + relationships)
+5. **Query:** When user asks, finds start nodes via vector search, then traverses the graph to expand context
+6. **Fusion:** Combines graph results + vector results via Reciprocal Rank Fusion
 
 **Integration:**
 ```typescript
@@ -126,69 +126,69 @@ class GraphRAGSkill implements CortexSkill {
 **References:**
 - Microsoft GraphRAG: github.com/microsoft/graphrag
 - Paper: From Local to Global (Microsoft Research 2024)
-- Agentic GraphRAG: Kiet hop voi multi-agent (2025 trend)
+- Agentic GraphRAG: Combined with multi-agent (2025 trend)
 
 ---
 
-### 1.2 Self-RAG — Tu Danh Gia Chat Luong Retrieval
+### 1.2 Self-RAG — Self-Evaluating Retrieval Quality
 
 **Priority:** P1
-**Effort:** 1 tuan
+**Effort:** 1 week
 **File:** `electron/services/skills/rag/self-rag-skill.ts`
 
-**Mo ta:** Thay vi luon trust ket qua retrieval, Self-RAG tu danh gia: (1) Co can retrieve khong? (2) Retrieved chunks co relevant khong? (3) Response co supported boi evidence khong? (4) Response co useful khong?
+**Description:** Instead of always trusting retrieval results, Self-RAG self-evaluates: (1) Is retrieval needed? (2) Are retrieved chunks relevant? (3) Is the response supported by evidence? (4) Is the response useful?
 
-**Cach hoat dong:**
-1. **Retrieval Decision:** LLM quyet dinh co can search khong (simple questions co the tra loi truc tiep)
-2. **Relevance Check:** Sau khi retrieve, LLM danh gia tung chunk: relevant / partially relevant / irrelevant
-3. **Filter:** Loai bo irrelevant chunks, giu relevant ones
-4. **Generate:** Tao response tu relevant chunks
-5. **Support Check:** LLM tu kiem tra response co duoc support boi evidence khong
-6. **Iterate:** Neu support thap, quay lai buoc 1 voi refined query
+**How it works:**
+1. **Retrieval Decision:** LLM decides whether a search is needed (simple questions can be answered directly)
+2. **Relevance Check:** After retrieval, LLM rates each chunk: relevant / partially relevant / irrelevant
+3. **Filter:** Removes irrelevant chunks, keeps relevant ones
+4. **Generate:** Creates response from relevant chunks
+5. **Support Check:** LLM self-checks whether the response is supported by evidence
+6. **Iterate:** If support is low, goes back to step 1 with a refined query
 
 **Dependencies:** llm-client, vector-search
 **References:** Paper: Self-RAG (arxiv 2310.11511)
 
 ---
 
-### 1.3 Corrective RAG (CRAG) — Tu Sua Retrieval Kem
+### 1.3 Corrective RAG (CRAG) — Auto-Correcting Poor Retrieval
 
 **Priority:** P1
-**Effort:** 1 tuan
+**Effort:** 1 week
 **File:** `electron/services/skills/rag/crag-skill.ts`
 
-**Mo ta:** Khi retrieval quality thap (confidence < threshold), CRAG tu dong: (1) Refine query, (2) Search lai voi strategy khac, (3) Fallback sang web search neu can.
+**Description:** When retrieval quality is low (confidence < threshold), CRAG automatically: (1) refines query, (2) re-searches with a different strategy, (3) falls back to web search if needed.
 
-**Cach hoat dong:**
-1. **Retrieve:** Thuc hien vector search binh thuong
-2. **Evaluate:** Dung cross-encoder danh gia relevance score
+**How it works:**
+1. **Retrieve:** Performs normal vector search
+2. **Evaluate:** Uses cross-encoder to score relevance
 3. **Decision:**
-   - Score > 0.7: CORRECT -> su dung truc tiep
-   - Score 0.3-0.7: AMBIGUOUS -> refine query va search lai
-   - Score < 0.3: INCORRECT -> rewrite query hoan toan, try khac strategy
-4. **Correction:** Transform retrieved docs (loai bo irrelevant parts, highlight key info)
+   - Score > 0.7: CORRECT → use directly
+   - Score 0.3–0.7: AMBIGUOUS → refine query and re-search
+   - Score < 0.3: INCORRECT → completely rewrite query, try different strategy
+4. **Correction:** Transforms retrieved docs (removes irrelevant parts, highlights key info)
 
 **Dependencies:** llm-client, vector-search, cross-encoder model
 **References:** Paper: CRAG (arxiv 2401.15884)
 
 ---
 
-### 1.4 Adaptive RAG — Tu Chon Strategy
+### 1.4 Adaptive RAG — Auto-Selecting Strategy
 
 **Priority:** P1
-**Effort:** 1 tuan
+**Effort:** 1 week
 **File:** `electron/services/skills/rag/adaptive-rag-skill.ts`
 
-**Mo ta:** Phan tich query complexity de chon strategy phu hop:
-- **No retrieval:** Cau hoi don gian, LLM tra loi truc tiep (tiet kiem tokens)
-- **Single-hop:** Cau hoi cu the ve 1 file/function -> vector search don gian
-- **Multi-hop:** Cau hoi phuc tap can ket noi nhieu pieces -> GraphRAG hoac iterative retrieval
+**Description:** Analyzes query complexity to select the right strategy:
+- **No retrieval:** Simple questions, LLM answers directly (saves tokens)
+- **Single-hop:** Specific question about 1 file/function → simple vector search
+- **Multi-hop:** Complex question requiring connecting multiple pieces → GraphRAG or iterative retrieval
 
-**Cach hoat dong:**
-1. **Classify:** LLM + heuristics phan loai query complexity (low/medium/high)
-2. **Route:** Chon RAG strategy tuong ung
-3. **Execute:** Chay strategy da chon
-4. **Learn:** Luu lai classification results de cai thien classifier qua thoi gian (feedback loop)
+**How it works:**
+1. **Classify:** LLM + heuristics classify query complexity (low/medium/high)
+2. **Route:** Selects corresponding RAG strategy
+3. **Execute:** Runs the selected strategy
+4. **Learn:** Saves classification results to improve the classifier over time (feedback loop)
 
 **Dependencies:** llm-client, graphrag-skill, vector-search
 **References:** Paper: Adaptive RAG (arxiv 2403.14403)
@@ -198,21 +198,21 @@ class GraphRAGSkill implements CortexSkill {
 ### 1.5 RAG Fusion — Multi-Query + Reciprocal Rank Fusion
 
 **Priority:** P0
-**Effort:** 3 ngay
+**Effort:** 3 days
 **File:** `electron/services/skills/rag/rag-fusion-skill.ts`
 
-**Mo ta:** Thay vi search bang 1 query goc, tao 3-5 query variants tu goc nhieu perspectives, search rieng, roi merge ket qua bang Reciprocal Rank Fusion (RRF).
+**Description:** Instead of searching with 1 original query, generates 3–5 query variants from multiple perspectives, searches separately, then merges results via Reciprocal Rank Fusion (RRF).
 
-**Cach hoat dong:**
-1. **Query Generation:** LLM tao 3-5 variants cua query goc
-   - Vi du: 'How does auth work?' -> 
+**How it works:**
+1. **Query Generation:** LLM generates 3–5 variants of the original query
+   - Example: 'How does auth work?' →
      - 'authentication middleware implementation'
      - 'login signup handler code'
      - 'JWT token validation flow'
      - 'user session management'
-2. **Parallel Search:** Search moi variant doc lap
+2. **Parallel Search:** Searches each variant independently
 3. **RRF Merge:** score(doc) = sum(1 / (k + rank_i)) for each query i
-4. **Deduplicate:** Loai bo duplicate chunks
+4. **Deduplicate:** Removes duplicate chunks
 5. **Return:** Top-K merged results
 
 **Dependencies:** vector-search, llm-client
@@ -223,16 +223,16 @@ class GraphRAGSkill implements CortexSkill {
 ### 1.6 HyDE — Hypothetical Document Embedding
 
 **Priority:** P1
-**Effort:** 2 ngay
+**Effort:** 2 days
 **File:** `electron/services/skills/rag/hyde-skill.ts`
 
-**Mo ta:** Thay vi embed query truc tiep (query ngan, khong du context), LLM tao 1 'hypothetical document' that SE tra loi query, roi dung document nay de search. Document giong code thuc hon, nen vector search chinh xac hon.
+**Description:** Instead of embedding the query directly (short query, insufficient context), LLM generates a 'hypothetical document' that WOULD answer the query, then uses that document for search. The document resembles real code, making vector search more accurate.
 
-**Cach hoat dong:**
-1. **Generate:** LLM tao hypothetical code/document se tra loi query
-2. **Embed:** Embed hypothetical document (khong phai query)
-3. **Search:** Tim chunks giong hypothetical document
-4. **Answer:** Dung real chunks (khong phai hypothetical) de tra loi
+**How it works:**
+1. **Generate:** LLM creates a hypothetical code/document that would answer the query
+2. **Embed:** Embeds the hypothetical document (not the query)
+3. **Search:** Finds chunks similar to the hypothetical document
+4. **Answer:** Uses real chunks (not the hypothetical) to generate the response
 
 **Dependencies:** llm-client, embedder, vector-search
 **References:** Paper: HyDE (arxiv 2212.10496)
@@ -242,27 +242,27 @@ class GraphRAGSkill implements CortexSkill {
 ### 1.7 Contextual Retrieval — Anthropic Approach
 
 **Priority:** P0
-**Effort:** 3 ngay
+**Effort:** 3 days
 **File:** `electron/services/skills/rag/contextual-retrieval-skill.ts`
 
-**Mo ta:** Van de cua chunking truyen thong: moi chunk mat context (file nao? function nao? module nao?). Contextual Retrieval them context vao moi chunk TRUOC khi embed.
+**Description:** Problem with traditional chunking: each chunk loses context (which file? which function? which module?). Contextual Retrieval adds context to each chunk BEFORE embedding.
 
-**Cach hoat dong:**
-1. **Chunk:** Cat code thanh chunks (su dung Tree-sitter cho code-aware chunking)
-2. **Add Context:** Voi moi chunk, prepend:
-   - File path va language
+**How it works:**
+1. **Chunk:** Splits code into chunks (using Tree-sitter for code-aware chunking)
+2. **Add Context:** For each chunk, prepend:
+   - File path and language
    - Parent function/class name
-   - Module description (tu doc string hoac architecture info)
+   - Module description (from docstring or architecture info)
    - Import/export relationships
-3. **Embed:** Embed chunk DA CO context (embedding chinh xac hon)
-4. **Store:** Luu contextual chunk vao vector DB
+3. **Embed:** Embeds the chunk WITH context (more accurate embedding)
+4. **Store:** Saves contextual chunk to vector DB
 
-**Vi du:**
+**Example:**
 ```
-// TRUOC (chunk thong thuong):
+// BEFORE (regular chunk):
 function validateToken(token: string) { ... }
 
-// SAU (contextual chunk):
+// AFTER (contextual chunk):
 // File: src/auth/middleware.ts
 // Module: Authentication
 // Parent: AuthMiddleware class
@@ -279,17 +279,17 @@ function validateToken(token: string) { ... }
 ### 1.8 Parent-Child Chunking
 
 **Priority:** P1
-**Effort:** 2 ngay
+**Effort:** 2 days
 **File:** `electron/services/skills/rag/parent-child-chunk-skill.ts`
 
-**Mo ta:** Tao 2 tang chunks: child chunks nho (de search chinh xac) va parent chunks lon (de co du context). Khi search, match child chunk nhung tra ve parent chunk.
+**Description:** Creates 2 tiers of chunks: small child chunks (for precise search) and large parent chunks (for sufficient context). When searching, matches child chunks but returns parent chunks.
 
-**Cach hoat dong:**
-1. **Parent Chunking:** Cat code thanh chunks lon (ca file hoac section lon)
-2. **Child Chunking:** Cat moi parent thanh children nho (1 function, 1 class)
-3. **Link:** Moi child giu reference den parent
-4. **Search:** Search tren child chunks (nho, chinh xac)
-5. **Return:** Tra ve parent chunk (lon, nhieu context)
+**How it works:**
+1. **Parent Chunking:** Splits code into large chunks (entire file or large section)
+2. **Child Chunking:** Splits each parent into small children (1 function, 1 class)
+3. **Link:** Each child keeps a reference to its parent
+4. **Search:** Searches on child chunks (small, precise)
+5. **Return:** Returns parent chunk (large, more context)
 
 **Dependencies:** code-chunker, vector-search
 **References:** LlamaIndex Parent-Child Retriever
@@ -299,17 +299,17 @@ function validateToken(token: string) { ... }
 ## Category 2: Self-Learning (6 skills)
 
 ### 2.1 DSPy Prompt Optimization
-**Priority:** P0 | **Effort:** 2 tuan | **File:** `electron/services/skills/learning/dspy-skill.ts`
+**Priority:** P0 | **Effort:** 2 weeks | **File:** `electron/services/skills/learning/dspy-skill.ts`
 
-**Mo ta:** DSPy (Stanford) cho phep dinh nghia AI pipeline bang code (khong phai prompts). Sau do optimizer TU DONG tim prompts tot nhat dua tren metrics. Cortex dung DSPy de tu cai thien chat quality qua thoi gian.
+**Description:** DSPy (Stanford) lets you define AI pipelines in code (not prompts). The optimizer then AUTOMATICALLY finds the best prompts based on metrics. Cortex uses DSPy to self-improve response quality over time.
 
-**Cach hoat dong:**
-1. **Define Signatures:** Dinh nghia input/output cho moi buoc (retrieve, reason, answer)
-2. **Define Metrics:** Tao metric function (relevance score, user satisfaction proxy)
-3. **Collect Examples:** Thu thap 50-100+ query-response pairs voi feedback
-4. **Optimize:** Chay DSPy optimizer (MIPROv2 hoac BootstrapFewShot) de tim best prompts
-5. **Deploy:** Cap nhat prompts trong Cortex, luu version cu de rollback
-6. **Monitor:** Track metrics sau optimization, so sanh voi baseline
+**How it works:**
+1. **Define Signatures:** Defines input/output for each step (retrieve, reason, answer)
+2. **Define Metrics:** Creates a metric function (relevance score, user satisfaction proxy)
+3. **Collect Examples:** Collects 50–100+ query-response pairs with feedback
+4. **Optimize:** Runs DSPy optimizer (MIPROv2 or BootstrapFewShot) to find the best prompts
+5. **Deploy:** Updates prompts in Cortex, saves old version for rollback
+6. **Monitor:** Tracks metrics after optimization, compares to baseline
 
 ```typescript
 // DSPy-inspired TypeScript implementation
@@ -335,24 +335,24 @@ class DSPySkill implements CortexSkill {
 }
 ```
 
-**Dependencies:** llm-client (Python DSPy co the goi qua child_process hoac re-implement core logic in TS)
+**Dependencies:** llm-client (Python DSPy can be called via child_process or core logic re-implemented in TS)
 **References:** dspy.ai, Paper: DSPy (Stanford 2023), MIPROv2 optimizer
 
 ---
 
 ### 2.2 Behavioral Analytics Engine
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/learning/behavioral-analytics.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/learning/behavioral-analytics.ts`
 
-**Mo ta:** Thu thap IMPLICIT feedback tu user actions: accept/reject suggestion, edit after suggestion, time-to-accept, follow-up questions, copy-paste patterns.
+**Description:** Collects IMPLICIT feedback from user actions: accept/reject suggestion, edit after suggestion, time-to-accept, follow-up questions, copy-paste patterns.
 
 **Events tracked:**
-- `response_accepted`: User khong sua, tiep tuc conversation
-- `response_edited`: User copy response nhung sua truoc khi dung
-- `response_rejected`: User hoi lai cung topic (implicit rejection)
-- `code_applied`: User copy code tu response va paste vao editor
-- `follow_up_asked`: User hoi follow-up (response chua du)
-- `time_to_action`: Thoi gian tu response den user action tiep theo
-- `session_length`: Tong thoi gian session (engagement metric)
+- `response_accepted`: User does not edit, continues conversation
+- `response_edited`: User copies response but modifies before using
+- `response_rejected`: User asks the same topic again (implicit rejection)
+- `code_applied`: User copies code from response and pastes into editor
+- `follow_up_asked`: User asks a follow-up (response was insufficient)
+- `time_to_action`: Time from response to next user action
+- `session_length`: Total session duration (engagement metric)
 
 ```typescript
 interface BehavioralEvent {
@@ -368,69 +368,69 @@ interface BehavioralEvent {
 }
 ```
 
-**Storage:** SQLite table `behavioral_events` voi indexes tren type, timestamp, skillUsed
+**Storage:** SQLite table `behavioral_events` with indexes on type, timestamp, skillUsed
 **References:** GitHub Copilot personalization (workspace indexing), Letta skill learning
 
 ---
 
 ### 2.3 Learned Reranking
-**Priority:** P1 | **Effort:** 1 tuan | **File:** `electron/services/skills/learning/learned-reranker.ts`
+**Priority:** P1 | **Effort:** 1 week | **File:** `electron/services/skills/learning/learned-reranker.ts`
 
-**Mo ta:** Cai thien search ranking dua tren user interactions. Khi user chap nhan response, cac chunks duoc used se duoc boost. Khi reject, chunks bi demote.
+**Description:** Improves search ranking based on user interactions. When a user accepts a response, the chunks used are boosted. When rejected, chunks are demoted.
 
-**Cach hoat dong:**
-1. **Collect Signals:** Tu behavioral events, map response quality -> retrieved chunks
-2. **Feature Extraction:** Cho moi chunk: vector similarity, BM25 score, graph distance, past usefulness
-3. **Train Ranker:** Lightweight cross-encoder fine-tuned tren feedback data
-4. **Apply:** Rerank search results truoc khi gui toi LLM
-5. **Update:** Retrain periodically (moi 100 new events)
+**How it works:**
+1. **Collect Signals:** From behavioral events, maps response quality → retrieved chunks
+2. **Feature Extraction:** For each chunk: vector similarity, BM25 score, graph distance, past usefulness
+3. **Train Ranker:** Lightweight cross-encoder fine-tuned on feedback data
+4. **Apply:** Reranks search results before sending to LLM
+5. **Update:** Retrains periodically (every 100 new events)
 
 **Dependencies:** behavioral-analytics, vector-search, cross-encoder model
-**References:** Learning to Rank (LTR), da co learned-reranker.ts can nang cap
+**References:** Learning to Rank (LTR), existing learned-reranker.ts needs upgrade
 
 ---
 
 ### 2.4 Preference Learning
-**Priority:** P1 | **Effort:** 1 tuan | **File:** `electron/services/skills/learning/preference-learning.ts`
+**Priority:** P1 | **Effort:** 1 week | **File:** `electron/services/skills/learning/preference-learning.ts`
 
-**Mo ta:** Hoc coding style va preferences cua user: naming conventions, architecture patterns, response format, level of detail.
+**Description:** Learns the user's coding style and preferences: naming conventions, architecture patterns, response format, level of detail.
 
-**Thu thap signals:**
-- Cac edits user lam tren suggestions (style corrections)
-- Code patterns trong repos cua user (naming, structure)
-- Response format preferences (chi tiet vs tom tat)
-- Language preferences (tieng Viet vs English)
+**Signals collected:**
+- Edits the user makes on suggestions (style corrections)
+- Code patterns in the user's repos (naming, structure)
+- Response format preferences (detailed vs. summary)
+- Language preferences (English vs. other)
 
-**Storage:** Core Memory (luon trong system prompt) + Archival Memory (chi tiet)
+**Storage:** Core Memory (always in system prompt) + Archival Memory (details)
 
 ---
 
 ### 2.5 Active Learning
-**Priority:** P2 | **Effort:** 3 ngay | **File:** `electron/services/skills/learning/active-learning.ts`
+**Priority:** P2 | **Effort:** 3 days | **File:** `electron/services/skills/learning/active-learning.ts`
 
-**Mo ta:** Khi Cortex khong chac chan, HOI user thay vi doan. Nhung chi hoi khi cau tra loi se giup cai thien dang ke (khong hoi nhieu qua).
+**Description:** When Cortex is uncertain, ASK the user instead of guessing. But only asks when the answer would significantly improve learning (not over-asking).
 
-**Cach hoat dong:**
-1. **Uncertainty Detection:** Khi confidence < 0.6, xem xet hoi user
-2. **Value Estimation:** Cau tra loi cua user co gia tri bao nhieu cho training?
-3. **Ask Strategy:** Hoi concise, specific, de tra loi (Yes/No hoac chon A/B)
-4. **Learn:** Cap nhat memory va preferences tu cau tra loi
+**How it works:**
+1. **Uncertainty Detection:** When confidence < 0.6, considers asking the user
+2. **Value Estimation:** How much is the user's answer worth for training?
+3. **Ask Strategy:** Asks concisely, specifically, easy to answer (Yes/No or choose A/B)
+4. **Learn:** Updates memory and preferences from the answer
 
 ---
 
 ### 2.6 RLAIF (RL from AI Feedback)
-**Priority:** P2 | **Effort:** 2 tuan | **File:** `electron/services/skills/learning/rlaif-skill.ts`
+**Priority:** P2 | **Effort:** 2 weeks | **File:** `electron/services/skills/learning/rlaif-skill.ts`
 
-**Mo ta:** AI tu critique chinh minh. Sau khi generate response, 1 'critic' LLM danh gia va cho diem. Diem nay duoc dung de cai thien prompt/retrieval.
+**Description:** AI critiques itself. After generating a response, a 'critic' LLM evaluates and scores it. The score is used to improve prompt/retrieval.
 
-**Cach hoat dong:**
-1. **Generate:** Tao response binh thuong
-2. **Critique:** LLM khac (hoac cung model voi different prompt) danh gia:
-   - Accuracy: Response co dung voi code khong?
-   - Completeness: Co thieu gi quan trong khong?
-   - Relevance: Co tra loi dung cau hoi khong?
-3. **Score:** Tong hop diem tu 3 criteria
-4. **Learn:** Dung scores de update DSPy optimization targets
+**How it works:**
+1. **Generate:** Creates a normal response
+2. **Critique:** A different LLM (or same model with different prompt) evaluates:
+   - Accuracy: Is the response correct with respect to the code?
+   - Completeness: Is anything important missing?
+   - Relevance: Does it answer the actual question?
+3. **Score:** Aggregates score from all 3 criteria
+4. **Learn:** Uses scores to update DSPy optimization targets
 
 **Dependencies:** llm-client, dspy-skill
 **References:** Paper: RLAIF (Google 2023)
@@ -440,12 +440,12 @@ interface BehavioralEvent {
 ## Category 3: Memory System (5 skills)
 
 ### 3.1 Tiered Memory (Letta/MemGPT Inspired)
-**Priority:** P0 | **Effort:** 2 tuan | **Files:** `electron/services/memory/`
+**Priority:** P0 | **Effort:** 2 weeks | **Files:** `electron/services/memory/`
 
-**Mo ta:** Bo nho 3 tang giong OS:
-- **Core Memory (~2000 tokens):** Luon trong system prompt. Chua user profile, project context, preferences. Agent co the TU EDIT.
-- **Archival Memory (unlimited):** Long-term storage, vector-searchable. Chua past decisions, patterns, lessons learned.
-- **Recall Memory (conversation):** Lich su hoi thoai, searchable theo content va time.
+**Description:** 3-tier memory like an OS:
+- **Core Memory (~2000 tokens):** Always in the system prompt. Contains user profile, project context, preferences. Agent can SELF-EDIT.
+- **Archival Memory (unlimited):** Long-term storage, vector-searchable. Contains past decisions, patterns, lessons learned.
+- **Recall Memory (conversation):** Conversation history, searchable by content and time.
 
 ```typescript
 interface MemoryManager {
@@ -466,68 +466,68 @@ interface MemoryManager {
 ---
 
 ### 3.2 Nano-Brain Integration (Upgrade)
-**Priority:** P0 | **Effort:** 3 ngay | **File:** `electron/services/memory/nano-brain-bridge.ts`
+**Priority:** P0 | **Effort:** 3 days | **File:** `electron/services/memory/nano-brain-bridge.ts`
 
-**Mo ta:** Da co nano-brain. Nang cap de lam backend cho Archival Memory tier. Giu compatibility voi existing data.
+**Description:** nano-brain already exists. Upgrade it to serve as the backend for the Archival Memory tier. Maintain compatibility with existing data.
 
 ---
 
 ### 3.3 Cross-Session Learning
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/memory/cross-session.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/memory/cross-session.ts`
 
-**Mo ta:** Agent nho va cai thien qua moi session. Khi bat dau session moi, load relevant memories tu archival. Khi ket thuc, tu dong summarize va archive key insights.
+**Description:** Agent remembers and improves across every session. At the start of a new session, loads relevant memories from archival. At the end, automatically summarizes and archives key insights.
 
-**Cach hoat dong:**
-1. **Session Start:** Query archival memory voi current project context
-2. **During Session:** Track important decisions, patterns discovered
-3. **Session End:** Summarize session -> store in archival memory
+**How it works:**
+1. **Session Start:** Queries archival memory with current project context
+2. **During Session:** Tracks important decisions, patterns discovered
+3. **Session End:** Summarizes session → stores in archival memory
 4. **Next Session:** Previous insights available automatically
 
 ---
 
 ### 3.4 Memory Compaction
-**Priority:** P1 | **Effort:** 3 ngay | **File:** `electron/services/memory/compaction.ts`
+**Priority:** P1 | **Effort:** 3 days | **File:** `electron/services/memory/compaction.ts`
 
-**Mo ta:** Khi archival memory qua lon, tu dong summarize va compact. Giu thong tin quan trong, loai bo chi tiet khong can thiet.
+**Description:** When archival memory grows too large, automatically summarizes and compacts it. Keeps important information, discards unnecessary details.
 
 ---
 
 ### 3.5 Memory Decay
-**Priority:** P2 | **Effort:** 2 ngay | **File:** `electron/services/memory/decay.ts`
+**Priority:** P2 | **Effort:** 2 days | **File:** `electron/services/memory/decay.ts`
 
-**Mo ta:** Thong tin cu va khong duoc truy cap se giam relevance score theo thoi gian. Thong tin outdated (code da thay doi) se duoc danh dau de cleanup.
+**Description:** Old and rarely-accessed information has its relevance score reduced over time. Outdated information (code that has since changed) is flagged for cleanup.
 
 ---
 
 ## Category 4: Efficiency Engine (6 skills)
 
 ### 4.1 LLMLingua Context Compression
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/efficiency/llmlingua-skill.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/efficiency/llmlingua-skill.ts`
 
-**Mo ta:** Nen context 3-6x truoc khi gui toi LLM. LLMLingua-2 loai bo tokens khong can thiet ma giu nguyen y nghia. Giam chi phi 60-80%.
+**Description:** Compresses context 3–6x before sending to LLM. LLMLingua-2 removes unnecessary tokens while preserving meaning. Reduces cost by 60–80%.
 
-**Cach hoat dong:**
+**How it works:**
 1. **Input:** Retrieved chunks + conversation history + system prompt
-2. **Compress:** LLMLingua-2 loai bo redundant tokens
-3. **Validate:** Kiem tra compressed context van giu du thong tin
-4. **Send:** Gui compressed context toi LLM (it tokens hon = re hon)
+2. **Compress:** LLMLingua-2 removes redundant tokens
+3. **Validate:** Checks that compressed context still contains sufficient information
+4. **Send:** Sends compressed context to LLM (fewer tokens = cheaper)
 
-**Integration:** Goi qua Python child_process (LLMLingua la Python library) hoac port core logic sang TS
+**Integration:** Called via Python child_process (LLMLingua is a Python library) or core logic ported to TS
 **References:** github.com/microsoft/LLMLingua, Integrated in LangChain + LlamaIndex
 
 ---
 
 ### 4.2 Semantic Caching
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/efficiency/semantic-cache.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/efficiency/semantic-cache.ts`
 
-**Mo ta:** Cache responses dua tren SEMANTIC similarity (khong phai exact match). Neu user hoi tuong tu query truoc do, tra ve cached response thay vi goi LLM lai.
+**Description:** Caches responses based on SEMANTIC similarity (not exact match). If the user asks a similar query to a previous one, returns the cached response instead of calling the LLM again.
 
-**Cach hoat dong:**
-1. **Query Embedding:** Embed user query
-2. **Cache Search:** Tim cached queries co similarity > 0.92
-3. **Hit:** Tra ve cached response (0 tokens, instant)
-4. **Miss:** Goi LLM binh thuong, cache response
-5. **Invalidation:** Clear cache khi brain duoc re-sync
+**How it works:**
+1. **Query Embedding:** Embeds the user query
+2. **Cache Search:** Finds cached queries with similarity > 0.92
+3. **Hit:** Returns cached response (0 tokens, instant)
+4. **Miss:** Calls LLM normally, caches the response
+5. **Invalidation:** Clears cache when the brain is re-synced
 
 ```typescript
 interface SemanticCache {
@@ -543,9 +543,9 @@ interface SemanticCache {
 ---
 
 ### 4.3 Model Routing
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/efficiency/model-router.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/efficiency/model-router.ts`
 
-**Mo ta:** Khong phai moi query can model dat nhat. Model routing phan loai query complexity va route:
+**Description:** Not every query needs the most expensive model. Model routing classifies query complexity and routes accordingly:
 - **Simple** (greeting, clarification): GPT-4o-mini ($0.15/1M tokens)
 - **Medium** (code explanation, single-file): GPT-4o ($2.50/1M tokens)
 - **Complex** (architecture, multi-file, debugging): Claude Opus / o1 ($15/1M tokens)
@@ -563,30 +563,30 @@ interface ModelRoute {
 class ModelRouter {
   classifyComplexity(query: string, context: SkillContext): 'low' | 'medium' | 'high';
   selectModel(complexity: string): ModelRoute;
-  // Learn from feedback: if cheap model fails, escalate
+    // Learns from feedback: if cheap model fails, escalates
 }
 ```
 
 ---
 
 ### 4.4 Prompt Caching
-**Priority:** P1 | **Effort:** 3 ngay | **File:** `electron/services/skills/efficiency/prompt-cache.ts`
+**Priority:** P1 | **Effort:** 3 days | **File:** `electron/services/skills/efficiency/prompt-cache.ts`
 
-**Mo ta:** System prompt + project context thuong giong nhau giua cac queries. Cache prefix nay de khong gui lai moi lan.
+**Description:** System prompt + project context are usually the same across queries. Caches this prefix so it is not re-sent every time.
 
 ---
 
 ### 4.5 Adaptive Token Budget
-**Priority:** P1 | **Effort:** 2 ngay | **File:** `electron/services/skills/efficiency/token-budget.ts`
+**Priority:** P1 | **Effort:** 2 days | **File:** `electron/services/skills/efficiency/token-budget.ts`
 
-**Mo ta:** Phan bo token budget dua tren query complexity. Simple query: 500 output tokens. Complex: 4000 output tokens. Tranh lang phi.
+**Description:** Allocates token budget based on query complexity. Simple query: 500 output tokens. Complex: 4000 output tokens. Prevents waste.
 
 ---
 
 ### 4.6 ChunkKV (KV Cache Compression)
-**Priority:** P2 | **Effort:** 2 tuan | **File:** `electron/services/skills/efficiency/chunkkv-skill.ts`
+**Priority:** P2 | **Effort:** 2 weeks | **File:** `electron/services/skills/efficiency/chunkkv-skill.ts`
 
-**Mo ta:** Nen KV cache cua LLM theo semantic chunks thay vi individual tokens. Giam memory 70% cho long-context inference.
+**Description:** Compresses the LLM's KV cache by semantic chunks instead of individual tokens. Reduces memory by 70% for long-context inference.
 **References:** Paper: ChunkKV (NeurIPS 2025)
 
 ---
@@ -594,9 +594,9 @@ class ModelRouter {
 ## Category 5: Agent/Tool Skills - MCP Based (9 skills)
 
 ### 5.1 MCP Protocol Core
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/mcp/mcp-client.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/mcp/mcp-client.ts`
 
-**Mo ta:** Implementation cua MCP client de ket noi voi bat ky MCP server nao. La foundation cho tat ca tool integrations.
+**Description:** Implementation of the MCP client for connecting to any MCP server. This is the foundation for all tool integrations.
 
 ```typescript
 interface MCPClient {
@@ -610,67 +610,67 @@ interface MCPClient {
 
 **References:** modelcontextprotocol.io, 5800+ MCP servers (2025)
 
-### 5.2-5.9: Playwright, GitHub, Jira, Confluence, Slack, Code Execution, Sequential Thinking, File System
-Moi tool la 1 MCP server adapter wrap thanh CortexSkill. Chi tiet implementation giong nhau:
+### 5.2–5.9: Playwright, GitHub, Jira, Confluence, Slack, Code Execution, Sequential Thinking, File System
+Each tool is an MCP server adapter wrapped as a CortexSkill. Implementation details are the same for all:
 1. Connect to MCP server
-2. Wrap available tools thanh skill methods
-3. Handle errors va timeouts
-4. Log usage cho cost tracking
+2. Wrap available tools as skill methods
+3. Handle errors and timeouts
+4. Log usage for cost tracking
 
 ---
 
 ## Category 6: Reasoning Skills (6 skills)
 
 ### 6.1 ReAct (Reasoning + Acting)
-**Priority:** P0 | **Effort:** 1 tuan | **File:** `electron/services/skills/reasoning/react-skill.ts`
+**Priority:** P0 | **Effort:** 1 week | **File:** `electron/services/skills/reasoning/react-skill.ts`
 
-**Mo ta:** Loop: Thought -> Action -> Observation -> repeat cho den khi co answer.
+**Description:** Loop: Thought → Action → Observation → repeat until answer is found.
 
 ```
 Loop:
-  1. THOUGHT: Suy nghi ve cach giai quyet
-  2. ACTION: Thuc hien hanh dong (search, read file, run code)
-  3. OBSERVATION: Quan sat ket qua
-  4. Neu du thong tin -> ANSWER
-  5. Neu chua -> quay lai buoc 1
+  1. THOUGHT: Think about how to solve the problem
+  2. ACTION: Perform an action (search, read file, run code)
+  3. OBSERVATION: Observe the result
+  4. If enough information → ANSWER
+  5. If not → go back to step 1
 ```
 
-### 6.2-6.6: Plan-and-Execute, Reflexion, LATS, Chain of Thought, Tree of Thoughts
-Chi tiet tuong tu. Moi skill implement 1 reasoning pattern cu the.
+### 6.2–6.6: Plan-and-Execute, Reflexion, LATS, Chain of Thought, Tree of Thoughts
+Details are similar. Each skill implements one specific reasoning pattern.
 
 ---
 
 ## Category 7: Code Intelligence (6 skills)
 
-### 7.1-7.6: Tree-sitter AST, AST-grep, LSP, Dependency Graph, Architecture Inference, Tech Debt
-Da co architecture-analyzer.ts va code-chunker.ts. Nang cap thanh CortexSkill interface.
-Them AST-grep cho pattern matching va LSP cho go-to-definition/references.
+### 7.1–7.6: Tree-sitter AST, AST-grep, LSP, Dependency Graph, Architecture Inference, Tech Debt
+Existing `architecture-analyzer.ts` and `code-chunker.ts`. Upgrade to the CortexSkill interface.
+Add AST-grep for pattern matching and LSP for go-to-definition/references.
 
 ---
 
 ## Category 8: Fine-tuning & Local AI (5 skills)
 
 ### 8.1 Custom Embedding Fine-tuning
-**Priority:** P1 | **Effort:** 2 tuan | **File:** `electron/services/skills/finetune/embedding-finetune.ts`
+**Priority:** P1 | **Effort:** 2 weeks | **File:** `electron/services/skills/finetune/embedding-finetune.ts`
 
-**Mo ta:** Train custom embedding model tren codebase cua ban. Embeddings se hieu code cua ban tot hon generic model.
+**Description:** Trains a custom embedding model on your codebase. The embeddings will understand your code better than a generic model.
 
-**Cach hoat dong:**
-1. **Generate Pairs:** Tao positive pairs (related code chunks) va negative pairs (unrelated)
-2. **Fine-tune:** Dung sentence-transformers de fine-tune tren pairs
-3. **Evaluate:** So sanh retrieval quality truoc/sau fine-tune
-4. **Deploy:** Replace generic embedder voi custom model
+**How it works:**
+1. **Generate Pairs:** Creates positive pairs (related code chunks) and negative pairs (unrelated)
+2. **Fine-tune:** Uses sentence-transformers to fine-tune on the pairs
+3. **Evaluate:** Compares retrieval quality before/after fine-tuning
+4. **Deploy:** Replaces the generic embedder with the custom model
 
-### 8.2-8.5: LoRA, Synthetic Data, DPO, Local Model Serving
-Advanced skills cho phase sau. LoRA can GPU, DPO can nhieu data.
-Local Model Serving (Ollama) la P1 - cho phep offline mode.
+### 8.2–8.5: LoRA, Synthetic Data, DPO, Local Model Serving
+Advanced skills for a later phase. LoRA requires GPU, DPO requires more data.
+Local Model Serving (Ollama) is P1 — enables offline mode.
 
 ---
 
-## Tong Ket
+## Summary
 
-| Category | So Skills | P0 | P1 | P2 |
-|----------|-----------|----|----|-----|
+| Category | Skills | P0 | P1 | P2 |
+|----------|--------|----|----|-----|
 | Advanced RAG | 8 | 3 | 5 | 0 |
 | Self-Learning | 6 | 2 | 2 | 2 |
 | Memory System | 5 | 3 | 1 | 1 |
@@ -679,6 +679,6 @@ Local Model Serving (Ollama) la P1 - cho phep offline mode.
 | Reasoning | 6 | 2 | 2 | 2 |
 | Code Intelligence | 6 | 3 | 2 | 1 |
 | Fine-tuning | 5 | 0 | 3 | 2 |
-| **TONG** | **51** | **19** | **21** | **11** |
+| **TOTAL** | **51** | **19** | **21** | **11** |
 
-**Sprint 13-18 se focus vao 19 P0 skills truoc, sau do P1, cuoi cung P2.**
+**Sprints 13–18 focus on the 19 P0 skills first, then P1, then P2.**
