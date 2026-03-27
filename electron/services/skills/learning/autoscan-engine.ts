@@ -37,6 +37,8 @@ export interface AutoScanConfig {
  enableEvolInstruct: boolean
  pauseDuringChat: boolean
  enabled: boolean
+ requestDelayMs: number
+ maxRetries: number
 }
 
 export interface AutoScanProgress {
@@ -50,6 +52,11 @@ export interface AutoScanProgress {
  lastRunAt: number | null
  isRunning: boolean
  currentProjectId: string | null
+ circuitStatus?: {
+  state: 'closed' | 'open' | 'half-open'
+  dailyCostUsd: number
+  dailyBudgetUsd: number
+ }
 }
 
 export interface AutoScanBatchResult {
@@ -69,12 +76,14 @@ interface ChunkRow {
 
 
 const DEFAULT_CONFIG: AutoScanConfig = {
- batchSize: 100,
+ batchSize: 20,
  judgeThreshold: 4.0,
  maxQuestionsPerChunk: 3,
  enableEvolInstruct: true,
  pauseDuringChat: true,
- enabled: true
+ enabled: false,
+ requestDelayMs: 500,
+ maxRetries: 3
 }
 
 let config: AutoScanConfig = { ...DEFAULT_CONFIG }
@@ -102,11 +111,140 @@ export function setAutoScanConfig(partial: Partial<AutoScanConfig>): void {
 }
 
 export function getAutoScanProgress(): AutoScanProgress {
- return { ...progress }
+ const cs = getCircuitStatus()
+ return {
+  ...progress,
+  circuitStatus: {
+   state: cs.state,
+   dailyCostUsd: cs.dailyCostUsd,
+   dailyBudgetUsd: cs.dailyBudgetUsd,
+  }
+ }
 }
 
 export function setAutoScanProgress(partial: Partial<AutoScanProgress>): void {
  progress = { ...progress, ...partial }
+}
+
+// =====================
+// Circuit Breaker — timed open state + daily budget guard
+// =====================
+
+interface CircuitBreakerState {
+ failures: number           // consecutive failures
+ state: 'closed' | 'open' | 'half-open'
+ openedAt: number           // timestamp when circuit opened
+ dailyCostUsd: number       // accumulated cost today
+ dailyResetAt: number       // next midnight reset timestamp
+}
+
+const CIRCUIT_CONFIG = {
+ maxFailures: 3,
+ openDurationMs: 30 * 60 * 1000,   // stay open 30 min then half-open
+ defaultDailyBudgetUsd: 0.50,       // $0.50/day default
+ costPerPair: 0.002,                // ~$0.002 per accepted pair estimate
+}
+
+function getMidnight(): number {
+ const d = new Date()
+ d.setHours(24, 0, 0, 0)
+ return d.getTime()
+}
+
+const circuitBreaker: CircuitBreakerState = {
+ failures: 0,
+ state: 'closed',
+ openedAt: 0,
+ dailyCostUsd: 0,
+ dailyResetAt: getMidnight(),
+}
+
+function checkDailyReset(): void {
+ if (Date.now() >= circuitBreaker.dailyResetAt) {
+  circuitBreaker.dailyCostUsd = 0
+  circuitBreaker.dailyResetAt = getMidnight()
+  logScan(`[Budget] Daily reset — new budget: $${CIRCUIT_CONFIG.defaultDailyBudgetUsd.toFixed(2)}`)
+ }
+}
+
+function isCircuitOpen(): boolean {
+ checkDailyReset()
+
+ // Budget exceeded → open circuit until midnight
+ if (circuitBreaker.dailyCostUsd >= CIRCUIT_CONFIG.defaultDailyBudgetUsd) {
+  if (circuitBreaker.state !== 'open') {
+   circuitBreaker.state = 'open'
+   circuitBreaker.openedAt = Date.now()
+   logScan(`[Circuit] OPEN — daily budget $${circuitBreaker.dailyCostUsd.toFixed(3)} exceeded $${CIRCUIT_CONFIG.defaultDailyBudgetUsd}`)
+  }
+  return true
+ }
+
+ if (circuitBreaker.state === 'closed') return false
+
+ if (circuitBreaker.state === 'open') {
+  const elapsed = Date.now() - circuitBreaker.openedAt
+  if (elapsed >= CIRCUIT_CONFIG.openDurationMs) {
+   circuitBreaker.state = 'half-open'
+   logScan(`[Circuit] HALF-OPEN — sending probe request`)
+   return false  // allow one probe
+  }
+  return true
+ }
+
+ // half-open: allow through
+ return false
+}
+
+function recordCircuitSuccess(): void {
+ if (circuitBreaker.state === 'half-open') {
+  logScan(`[Circuit] CLOSED — probe succeeded`)
+ }
+ circuitBreaker.failures = 0
+ circuitBreaker.state = 'closed'
+}
+
+function recordCircuitFailure(): void {
+ circuitBreaker.failures++
+ if (circuitBreaker.state === 'half-open') {
+  // Probe failed → re-open
+  circuitBreaker.state = 'open'
+  circuitBreaker.openedAt = Date.now()
+  logScan(`[Circuit] OPEN again — probe failed (failures=${circuitBreaker.failures})`)
+ } else if (circuitBreaker.failures >= CIRCUIT_CONFIG.maxFailures && circuitBreaker.state === 'closed') {
+  circuitBreaker.state = 'open'
+  circuitBreaker.openedAt = Date.now()
+  logScan(`[Circuit] OPEN — ${circuitBreaker.failures} consecutive failures`)
+ }
+}
+
+export function recordCircuitCost(usd: number): void {
+ checkDailyReset()
+ circuitBreaker.dailyCostUsd += usd
+}
+
+export function getCircuitStatus(): {
+ state: CircuitBreakerState['state']
+ failures: number
+ dailyCostUsd: number
+ dailyBudgetUsd: number
+ dailyResetAt: number
+} {
+ return {
+  state: circuitBreaker.state,
+  failures: circuitBreaker.failures,
+  dailyCostUsd: circuitBreaker.dailyCostUsd,
+  dailyBudgetUsd: CIRCUIT_CONFIG.defaultDailyBudgetUsd,
+  dailyResetAt: circuitBreaker.dailyResetAt,
+ }
+}
+
+// Keep backward compat
+let consecutiveErrors = 0
+const MAX_CONSECUTIVE_ERRORS = 3
+
+function sleep(ms: number): Promise<void> {
+ return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function callLLM(
@@ -116,40 +254,86 @@ async function callLLM(
  maxTokens: number = 2048,
  label?: string
 ): Promise<string> {
- const t0 = Date.now()
- try {
- const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
- method: 'POST',
- headers: {
- 'Content-Type': 'application/json',
- Authorization: `Bearer ${getProxyKey()}`
- },
- body: JSON.stringify({
- model: getTrainingModel(),
- messages: [
- { role: 'system', content: systemPrompt },
- { role: 'user', content: userContent }
- ],
- stream: false,
- temperature,
- max_tokens: maxTokens
- })
- })
-
- const elapsed = Date.now() - t0
- if (!response.ok) {
- logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
- return ''
+ // New circuit breaker (timed + budget-aware)
+ if (isCircuitOpen()) {
+  logTrain(`[Circuit OPEN] Skipping LLM call | ${label ?? '?'} | cost=$${circuitBreaker.dailyCostUsd.toFixed(3)}`)
+  return ''
  }
 
- const data = await response.json() as { choices: Array<{ message: { content: string } }> }
- logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
- return data.choices?.[0]?.message?.content || ''
- } catch (err) {
- const elapsed = Date.now() - t0
- logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${(err as Error).message}`)
- return ''
+ // Legacy guard (backward compat, kept for in-loop checks)
+ if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  logTrain(`[Circuit breaker OPEN] Skipping LLM call | ${label ?? '?'}`)
+  return ''
  }
+
+ const maxRetries = config.maxRetries ?? 3
+ let attempt = 0
+
+ while (attempt <= maxRetries) {
+  const t0 = Date.now()
+  try {
+   const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+     'Content-Type': 'application/json',
+     Authorization: `Bearer ${getProxyKey()}`
+    },
+    body: JSON.stringify({
+     model: getTrainingModel(),
+     messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent }
+     ],
+     stream: false,
+     temperature,
+     max_tokens: maxTokens
+    })
+   })
+
+   const elapsed = Date.now() - t0
+
+    if (response.status === 429 || response.status === 503) {
+     consecutiveErrors++
+     recordCircuitFailure()
+     const retryAfterHeader = response.headers.get('retry-after')
+    const backoffMs = retryAfterHeader
+     ? parseInt(retryAfterHeader, 10) * 1000
+     : Math.min(1000 * Math.pow(2, attempt), 30_000)
+    logTrain(`LLM ${response.status} (attempt ${attempt + 1}/${maxRetries + 1}) | backoff ${backoffMs}ms | ${label ?? '?'}`)
+    if (attempt >= maxRetries) return ''
+    await sleep(backoffMs)
+    attempt++
+    continue
+   }
+
+   if (!response.ok) {
+     consecutiveErrors++
+     recordCircuitFailure()
+     logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+     return ''
+    }
+
+    consecutiveErrors = 0
+    recordCircuitSuccess()
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> }
+    logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+    return data.choices?.[0]?.message?.content || ''
+   } catch (err) {
+    consecutiveErrors++
+    recordCircuitFailure()
+    const elapsed = Date.now() - t0
+    logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${(err as Error).message}`)
+    if (attempt >= maxRetries) return ''
+    await sleep(1000 * Math.pow(2, attempt))
+    attempt++
+   }
+ }
+
+ return ''
+}
+
+export function resetCircuitBreaker(): void {
+ consecutiveErrors = 0
 }
 
 const QUESTION_GEN_SYSTEM = `You are a code knowledge extractor. Given code chunks from a software project, generate diverse questions that developers would realistically ask.
@@ -222,6 +406,9 @@ export async function generateQuestionsForChunks(
  const sub = chunks.slice(i, i + QUESTION_SUB_BATCH)
  const subResult = await generateQuestionsForSubBatch(sub)
  for (const [k, v] of subResult) result.set(k, v)
+ if (i + QUESTION_SUB_BATCH < chunks.length) {
+  await sleep(config.requestDelayMs)
+ }
  }
 
  return result
@@ -318,7 +505,8 @@ export async function saveAcceptedPair(
  judgeScore: number
 ): Promise<void> {
  try {
- const db = getDb()
+  recordCircuitCost(CIRCUIT_CONFIG.costPerPair)
+  const db = getDb()
  const pairId = randomUUID()
 
  // Save to training_pairs (for reranker + DSPy optimization)
@@ -376,32 +564,40 @@ export async function runBatch(
  chunksScanned = chunks.length
 
  for (const chunk of chunks) {
+ if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  logScan(`[Code] Circuit breaker OPEN — dừng batch sớm`)
+  break
+ }
+
  const questions = questionMap.get(chunk.id) || []
  const topic = chunk.file_path.split('/').slice(-2).join('/')
 
  for (const qItem of questions) {
- let question = qItem.question
- pairsGenerated++
+  let question = qItem.question
+  pairsGenerated++
 
- if (config.enableEvolInstruct && Math.random() < 0.3) {
- logTrain(`[Evol-Instruct] Chủ đề: ${topic} | Câu gốc: "${truncate(question, 60)}"`)
- question = await evolveQuestion(question)
- }
+  if (config.enableEvolInstruct && Math.random() < 0.3) {
+  logTrain(`[Evol-Instruct] Chủ đề: ${topic} | Câu gốc: "${truncate(question, 60)}"`)
+  question = await evolveQuestion(question)
+  await sleep(config.requestDelayMs)
+  }
 
- logTrain(`[Code/${qItem.type}] ${topic} | Q: "${truncate(question, 80)}"`)
- const answer = await answerQuestion(question, chunk.content, chunk.file_path)
- if (!answer) { pairsRejected++; continue }
+  logTrain(`[Code/${qItem.type}] ${topic} | Q: "${truncate(question, 80)}"`)
+  const answer = await answerQuestion(question, chunk.content, chunk.file_path)
+  await sleep(config.requestDelayMs)
+  if (!answer) { pairsRejected++; continue }
 
- const judgment = await judgeQAPair(question, answer, chunk.content)
+  const judgment = await judgeQAPair(question, answer, chunk.content)
+  await sleep(config.requestDelayMs)
 
- if (judgment.accepted) {
- await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
- pairsAccepted++
- logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
- } else {
- logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
- pairsRejected++
- }
+  if (judgment.accepted) {
+  await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
+  pairsAccepted++
+  logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
+  } else {
+  logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
+  pairsRejected++
+  }
  }
  }
 
@@ -436,6 +632,11 @@ export async function runCrystalBatch(projectId: string): Promise<AutoScanBatchR
  logScan(`[Crystal] ${crystals.length} crystals | bắt đầu...`)
 
  for (const crystal of crystals) {
+ if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  logScan(`[Crystal] Circuit breaker OPEN — dừng crystal batch sớm`)
+  break
+ }
+
  if (!crystal.content || crystal.content.length < 50) continue
 
  const topic = `${crystal.crystalType}/${crystal.domain || 'general'}`
@@ -447,14 +648,17 @@ export async function runCrystalBatch(projectId: string): Promise<AutoScanBatchR
  questionPrompt,
  0.7, 256, `crystal-q | ${topic}`
  )
+ await sleep(config.requestDelayMs)
 
  if (!question.trim()) continue
  pairsGenerated++
 
  const answer = await answerQuestion(question, crystal.content, crystal.domain || 'general')
+ await sleep(config.requestDelayMs)
  if (!answer) { pairsRejected++; continue }
 
  const judgment = await judgeQAPair(question, answer, crystal.content)
+ await sleep(config.requestDelayMs)
 
  if (judgment.accepted) {
  await saveAcceptedPair(projectId, question, answer, 'crystal', crystal.id, judgment.score)
@@ -537,6 +741,11 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
  chunksScanned = jiraChunks.length
 
  for (let i = 0; i < jiraChunks.length; i += QUESTION_SUB_BATCH) {
+ if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  logScan(`[Jira] Circuit breaker OPEN — dừng Jira batch sớm`)
+  break
+ }
+
  const sub = jiraChunks.slice(i, i + QUESTION_SUB_BATCH)
  const issueKeys = sub.map(c => c.name).join(', ')
  const subContext = sub.map(c => `[ChunkID: ${c.id}]\n${c.content.slice(0, 600)}`).join('\n\n---\n\n')
@@ -544,44 +753,49 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
  logScan(`[Jira] Batch ${i}–${i + sub.length} | Issues: ${truncate(issueKeys, 60)}`)
  try {
  const raw = await callLLM(
- JIRA_QUESTION_SYSTEM,
- `Generate questions for these ${sub.length} Jira issues:\n\n${subContext}`,
- 0.8, 8192,
- `jira-q batch=${i} issues=${issueKeys.slice(0, 40)}`
+  JIRA_QUESTION_SYSTEM,
+  `Generate questions for these ${sub.length} Jira issues:\n\n${subContext}`,
+  0.8, 8192,
+  `jira-q batch=${i} issues=${issueKeys.slice(0, 40)}`
  )
+ await sleep(config.requestDelayMs)
  const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[)/s) || raw.match(/\[[\s\S]*\]/)
  if (!jsonMatch) { logScan(`[Jira] Batch ${i}: không parse được JSON`); continue }
 
  const parsed = JSON.parse(jsonMatch[0]) as Array<{
- chunkId: string
- questions: Array<{ type: string; question: string }>
+  chunkId: string
+  questions: Array<{ type: string; question: string }>
  }>
 
  for (const item of parsed) {
- const chunk = sub.find(c => c.id === item.chunkId)
- if (!chunk || !Array.isArray(item.questions)) continue
+  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break
 
- for (const qItem of item.questions) {
- pairsGenerated++
- logTrain(`[Jira/${qItem.type}] ${chunk.name} | Q: "${truncate(qItem.question, 80)}"`)
- const answer = await callLLM(
- JIRA_ANSWER_SYSTEM,
- `Jira data:\n${chunk.content.slice(0, 1200)}\n\nQuestion: ${qItem.question}`,
- 0.2, 1024,
- `jira-ans | ${chunk.name} | ${truncate(qItem.question, 40)}`
- )
- if (!answer) { pairsRejected++; continue }
+  const chunk = sub.find(c => c.id === item.chunkId)
+  if (!chunk || !Array.isArray(item.questions)) continue
 
- const judgment = await judgeQAPair(qItem.question, answer, chunk.content)
- if (judgment.accepted) {
- await saveAcceptedPair(projectId, qItem.question, answer, 'chunk', chunk.id, judgment.score)
- pairsAccepted++
- logLearn(`[Jira] Lưu pair | score=${judgment.score.toFixed(1)} | ${chunk.name} | "${truncate(qItem.question, 60)}"`)
- } else {
- logLearn(`[Jira] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(qItem.question, 60)}"`)
- pairsRejected++
- }
- }
+  for (const qItem of item.questions) {
+  pairsGenerated++
+  logTrain(`[Jira/${qItem.type}] ${chunk.name} | Q: "${truncate(qItem.question, 80)}"`)
+  const answer = await callLLM(
+   JIRA_ANSWER_SYSTEM,
+   `Jira data:\n${chunk.content.slice(0, 1200)}\n\nQuestion: ${qItem.question}`,
+   0.2, 1024,
+   `jira-ans | ${chunk.name} | ${truncate(qItem.question, 40)}`
+  )
+  await sleep(config.requestDelayMs)
+  if (!answer) { pairsRejected++; continue }
+
+  const judgment = await judgeQAPair(qItem.question, answer, chunk.content)
+  await sleep(config.requestDelayMs)
+  if (judgment.accepted) {
+   await saveAcceptedPair(projectId, qItem.question, answer, 'chunk', chunk.id, judgment.score)
+   pairsAccepted++
+   logLearn(`[Jira] Lưu pair | score=${judgment.score.toFixed(1)} | ${chunk.name} | "${truncate(qItem.question, 60)}"`)
+  } else {
+   logLearn(`[Jira] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(qItem.question, 60)}"`)
+   pairsRejected++
+  }
+  }
  }
  } catch (err) {
  logScan(`[Jira] Sub-batch ${i} thất bại: ${(err as Error).message}`)
@@ -634,6 +848,11 @@ export async function runConfluenceBatch(projectId: string): Promise<AutoScanBat
  chunksScanned = confChunks.length
 
  for (let i = 0; i < confChunks.length; i += QUESTION_SUB_BATCH) {
+ if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+  logScan(`[Confluence] Circuit breaker OPEN — dừng Confluence batch sớm`)
+  break
+ }
+
  const sub = confChunks.slice(i, i + QUESTION_SUB_BATCH)
  const pageNames = sub.map(c => c.name).join(', ')
  const subContext = sub.map(c => `[ChunkID: ${c.id}]\n${c.content.slice(0, 800)}`).join('\n\n---\n\n')
@@ -641,44 +860,49 @@ export async function runConfluenceBatch(projectId: string): Promise<AutoScanBat
  logScan(`[Confluence] Batch ${i}–${i + sub.length} | Pages: ${truncate(pageNames, 60)}`)
  try {
  const raw = await callLLM(
- CONFLUENCE_QUESTION_SYSTEM,
- `Generate questions for these ${sub.length} Confluence pages:\n\n${subContext}`,
- 0.8, 8192,
- `conf-q batch=${i} pages=${pageNames.slice(0, 40)}`
+  CONFLUENCE_QUESTION_SYSTEM,
+  `Generate questions for these ${sub.length} Confluence pages:\n\n${subContext}`,
+  0.8, 8192,
+  `conf-q batch=${i} pages=${pageNames.slice(0, 40)}`
  )
+ await sleep(config.requestDelayMs)
  const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[)/s) || raw.match(/\[[\s\S]*\]/)
  if (!jsonMatch) { logScan(`[Confluence] Batch ${i}: không parse được JSON`); continue }
 
  const parsed = JSON.parse(jsonMatch[0]) as Array<{
- chunkId: string
- questions: Array<{ type: string; question: string }>
+  chunkId: string
+  questions: Array<{ type: string; question: string }>
  }>
 
  for (const item of parsed) {
- const chunk = sub.find(c => c.id === item.chunkId)
- if (!chunk || !Array.isArray(item.questions)) continue
+  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break
 
- for (const qItem of item.questions) {
- pairsGenerated++
- logTrain(`[Confluence/${qItem.type}] "${truncate(chunk.name, 30)}" | Q: "${truncate(qItem.question, 80)}"`)
- const answer = await callLLM(
- CONFLUENCE_ANSWER_SYSTEM,
- `Confluence page:\n${chunk.content.slice(0, 1500)}\n\nQuestion: ${qItem.question}`,
- 0.2, 1024,
- `conf-ans | ${truncate(chunk.name, 30)} | ${truncate(qItem.question, 40)}`
- )
- if (!answer) { pairsRejected++; continue }
+  const chunk = sub.find(c => c.id === item.chunkId)
+  if (!chunk || !Array.isArray(item.questions)) continue
 
- const judgment = await judgeQAPair(qItem.question, answer, chunk.content)
- if (judgment.accepted) {
- await saveAcceptedPair(projectId, qItem.question, answer, 'chunk', chunk.id, judgment.score)
- pairsAccepted++
- logLearn(`[Confluence] Lưu pair | score=${judgment.score.toFixed(1)} | "${truncate(chunk.name, 30)}" | "${truncate(qItem.question, 60)}"`)
- } else {
- logLearn(`[Confluence] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(qItem.question, 60)}"`)
- pairsRejected++
- }
- }
+  for (const qItem of item.questions) {
+  pairsGenerated++
+  logTrain(`[Confluence/${qItem.type}] "${truncate(chunk.name, 30)}" | Q: "${truncate(qItem.question, 80)}"`)
+  const answer = await callLLM(
+   CONFLUENCE_ANSWER_SYSTEM,
+   `Confluence page:\n${chunk.content.slice(0, 1500)}\n\nQuestion: ${qItem.question}`,
+   0.2, 1024,
+   `conf-ans | ${truncate(chunk.name, 30)} | ${truncate(qItem.question, 40)}`
+  )
+  await sleep(config.requestDelayMs)
+  if (!answer) { pairsRejected++; continue }
+
+  const judgment = await judgeQAPair(qItem.question, answer, chunk.content)
+  await sleep(config.requestDelayMs)
+  if (judgment.accepted) {
+   await saveAcceptedPair(projectId, qItem.question, answer, 'chunk', chunk.id, judgment.score)
+   pairsAccepted++
+   logLearn(`[Confluence] Lưu pair | score=${judgment.score.toFixed(1)} | "${truncate(chunk.name, 30)}" | "${truncate(qItem.question, 60)}"`)
+  } else {
+   logLearn(`[Confluence] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(qItem.question, 60)}"`)
+   pairsRejected++
+  }
+  }
  }
  } catch (err) {
  logScan(`[Confluence] Sub-batch ${i} thất bại: ${(err as Error).message}`)
