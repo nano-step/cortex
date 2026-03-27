@@ -1,14 +1,17 @@
 /**
- * Nano-Brain Service — Integration with nano-brain memory system
+ * Nano-Brain Service — DEPRECATED
  *
- * Manages nano-brain initialization, collections, and queries for Cortex projects.
- * nano-brain is invoked via CLI (npx nano-brain) for workspace-level memory.
+ * This service is being phased out in favour of the 3-tier Memory system
+ * (electron/services/memory/memory-manager.ts) which provides Core, Archival,
+ * and Recall memory with proper vector search and no external CLI dependency.
  *
- * Flow:
- * 1. On project creation → initNanoBrain (init workspace + add collection)
- * 2. On repo import → addCollection for the new repo
- * 3. During chat → queryNanoBrain for supplementary context
- * 4. On sync → triggerEmbedding to update vectors
+ * Migration path:
+ *   queryNanoBrain()  → searchArchivalMemory() / searchMemory()
+ *   initNanoBrain()   → memory system is auto-initialised per project
+ *   triggerEmbedding() → embedProjectChunks() in embedder.ts
+ *
+ * This file is kept temporarily to avoid breaking IPC handlers that still
+ * call into it. Remove once IPC modules are refactored (Track A1).
  */
 
 import { execFile } from 'child_process'
@@ -81,6 +84,7 @@ async function execNanoBrain(args: string[]): Promise<{ stdout: string; stderr: 
  * named after the project.
  */
 export async function initNanoBrain(projectName: string, localPath: string): Promise<boolean> {
+  console.warn('[NanoBrain] DEPRECATED: initNanoBrain() — memory system auto-initialises per project via memory-manager.ts')
   try {
     console.log(`[NanoBrain] Initializing for project "${projectName}" at ${localPath}`)
 
@@ -213,6 +217,7 @@ export async function queryNanoBrain(
   query: string,
   options?: { limit?: number; collection?: string }
 ): Promise<NanoBrainQueryResult[]> {
+  console.warn('[NanoBrain] DEPRECATED: queryNanoBrain() — migrate to searchMemory() in memory-manager.ts')
   try {
     const args = ['query', query, '--json']
     if (options?.limit) args.push('-n', String(options.limit))
