@@ -8,7 +8,7 @@
 
 import { getDb, chunkQueries } from './db'
 import { BrowserWindow } from 'electron'
-import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getGitHubPAT, getEmbeddingProvider, getBulkEmbeddingProvider, getSetting, setSetting } from './settings-service'
+import { getProxyUrl, getProxyKey, getJinaApiKey, getVoyageApiKey, getGitHubPAT, getEmbeddingProvider, getBulkEmbeddingProvider, getSetting, setSetting, getOllamaUrl, getOllamaEmbeddingModel } from './settings-service'
 import type { EmbeddingProviderType } from './settings-service'
 
 export const EMBEDDING_DIMENSIONS = 1024
@@ -303,6 +303,13 @@ async function embedTextsRaw(
       }
       break
     }
+    case 'ollama': {
+      const ollamaBase = getOllamaUrl().replace(/\/$/, '')
+      baseUrl = `${ollamaBase}/api/embed`
+      apiKey = ''
+      reqBody = { model: getOllamaEmbeddingModel(), input: truncated }
+      break
+    }
     default: {
       baseUrl = `${getProxyUrl()}/v1/embeddings`
       apiKey = getProxyKey()
@@ -356,13 +363,18 @@ async function embedTextsRaw(
       throw new Error(`Embedding API error ${response.status} (${provider}): ${errBody.slice(0, 200)}`)
     }
 
-    const data = await response.json() as {
-      data: Array<{ embedding: number[]; index: number }>
-    }
+    const rawData = await response.json() as Record<string, unknown>
 
     const result: number[][] = new Array(texts.length)
-    for (const item of data.data) {
-      result[item.index] = item.embedding
+
+    if (provider === 'ollama' && Array.isArray(rawData['embeddings'])) {
+      const embeddings = rawData['embeddings'] as number[][]
+      for (let i = 0; i < embeddings.length; i++) result[i] = embeddings[i]
+    } else {
+      const items = (rawData['data'] || rawData['embeddings']) as Array<{ embedding: number[]; index: number }> | undefined
+      if (items) {
+        for (const item of items) result[item.index] = item.embedding
+      }
     }
 
     console.log(`[Embedder] ${provider}: embedded ${texts.length} texts (${estimateTokens(truncated)} tokens)`)

@@ -301,12 +301,29 @@ export function setGitHubModelsEmbeddingEnabled(enabled: boolean): void {
   setSetting('github_models_embedding', enabled ? 'true' : 'false', false)
 }
 
-export type EmbeddingProviderType = 'github' | 'voyage' | 'jina' | 'proxy'
+export type EmbeddingProviderType = 'github' | 'voyage' | 'jina' | 'proxy' | 'ollama'
+
+export function getOllamaUrl(): string {
+  return getSetting('ollama_url') || ''
+}
+
+export function setOllamaUrl(url: string): void {
+  setSetting('ollama_url', url, false)
+}
+
+export function getOllamaEmbeddingModel(): string {
+  return getSetting('ollama_embedding_model') || 'nomic-embed-text'
+}
+
+export function setOllamaEmbeddingModel(model: string): void {
+  setSetting('ollama_embedding_model', model, false)
+}
 
 export function getEmbeddingProvider(): EmbeddingProviderType {
   if (getGitHubModelsEmbeddingEnabled() && getGitHubPAT()) return 'github'
   if (getVoyageApiKey()) return 'voyage'
   if (getJinaApiKey()) return 'jina'
+  if (getOllamaUrl()) return 'ollama'
   return 'proxy'
 }
 
@@ -314,6 +331,7 @@ export function getBulkEmbeddingProvider(): EmbeddingProviderType {
   if (getVoyageApiKey()) return 'voyage'
   if (getJinaApiKey()) return 'jina'
   if (getGitHubModelsEmbeddingEnabled() && getGitHubPAT()) return 'github'
+  if (getOllamaUrl()) return 'ollama'
   return 'proxy'
 }
 
