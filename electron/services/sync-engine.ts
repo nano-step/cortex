@@ -21,6 +21,8 @@ import { chunkCode } from './code-chunker'
 import { readFileContent, scanDirectory, getDirectoryTree } from './file-scanner'
 import { pullLatest, getChangedFiles, getLatestSha, switchBranch, getCurrentBranch, listBranches, getGitHubToken, getBranchDiffFiles } from './git-service'
 import { embedProjectChunks } from './embedder'
+import { invalidateCacheForProject } from './skills/efficiency/semantic-cache'
+import { rebuildGraphForFiles } from './skills/rag/graph-builder'
 
 // Active file watchers per repo
 const activeWatchers = new Map<string, FSWatcher>()
@@ -159,6 +161,17 @@ export async function syncGithubRepo(
     await embedProjectChunks(projectId)
   } catch {
     // Non-fatal
+  }
+
+  invalidateCacheForProject(projectId)
+
+  const changedFiles = [...added, ...modified]
+  if (changedFiles.length > 0) {
+    try {
+      rebuildGraphForFiles(projectId, changedFiles)
+    } catch (graphErr) {
+      console.warn('[Sync] Graph rebuild failed (non-fatal):', graphErr)
+    }
   }
 
   sendProgress('Sync hoàn tất!')
@@ -308,6 +321,17 @@ export async function syncLocalRepo(
     await embedProjectChunks(projectId)
   } catch {
     // Non-fatal
+  }
+
+  invalidateCacheForProject(projectId)
+
+  const changedFilesLocal = [...added, ...modified]
+  if (changedFilesLocal.length > 0) {
+    try {
+      rebuildGraphForFiles(projectId, changedFilesLocal)
+    } catch (graphErr) {
+      console.warn('[Sync] Graph rebuild failed (non-fatal):', graphErr)
+    }
   }
 
   sendProgress('Sync hoàn tất!')

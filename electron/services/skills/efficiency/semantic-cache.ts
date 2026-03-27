@@ -19,6 +19,7 @@ export function initCacheSchema(): void {
       query_embedding BLOB,
       response TEXT NOT NULL,
       model TEXT,
+      project_id TEXT,
       tokens_saved INTEGER DEFAULT 0,
       hit_count INTEGER DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
@@ -26,7 +27,16 @@ export function initCacheSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_cache_hash ON semantic_cache(query_hash);
     CREATE INDEX IF NOT EXISTS idx_cache_expires ON semantic_cache(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_cache_project ON semantic_cache(project_id);
   `)
+
+  // Migration: add project_id column if it doesn't exist yet (for existing installs)
+  try {
+    db.exec(`ALTER TABLE semantic_cache ADD COLUMN project_id TEXT`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_cache_project ON semantic_cache(project_id)`)
+  } catch {
+    // Column already exists — expected on fresh installs
+  }
 }
 
 export async function getCachedResponse(query: string, threshold: number = 0.92): Promise<{ response: string, tokensSaved: number } | null> {
@@ -62,7 +72,7 @@ export async function getCachedResponse(query: string, threshold: number = 0.92)
   }
 }
 
-export async function cacheResponse(query: string, response: string, model: string, tokenCount: number): Promise<void> {
+export async function cacheResponse(query: string, response: string, model: string, tokenCount: number, projectId?: string): Promise<void> {
   try {
     const db = getDb()
     const hash = generateCacheKey(query)
@@ -72,8 +82,8 @@ export async function cacheResponse(query: string, response: string, model: stri
       embeddingBuffer = Buffer.from(new Float32Array(embedding).buffer)
     } catch { /* skip embedding */ }
 
-    db.prepare('INSERT OR REPLACE INTO semantic_cache (id, query_hash, query_text, query_embedding, response, model, tokens_saved, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-      randomUUID(), hash, query, embeddingBuffer, response, model, tokenCount, Date.now() + CACHE_TTL
+    db.prepare('INSERT OR REPLACE INTO semantic_cache (id, query_hash, query_text, query_embedding, response, model, project_id, tokens_saved, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      randomUUID(), hash, query, embeddingBuffer, response, model, projectId ?? null, tokenCount, Date.now() + CACHE_TTL
     )
   } catch (err) {
     console.error('[SemanticCache] Cache write failed:', err)
@@ -98,6 +108,20 @@ export function invalidateCache(): number {
     return result.changes
   } catch (err) {
     console.error('[SemanticCache] Invalidation failed:', err)
+    return 0
+  }
+}
+
+export function invalidateCacheForProject(projectId: string): number {
+  try {
+    const db = getDb()
+    const result = db.prepare('DELETE FROM semantic_cache WHERE project_id = ?').run(projectId)
+    if (result.changes > 0) {
+      console.log(`[SemanticCache] Invalidated ${result.changes} entries for project ${projectId}`)
+    }
+    return result.changes
+  } catch (err) {
+    console.error('[SemanticCache] Project invalidation failed:', err)
     return 0
   }
 }
