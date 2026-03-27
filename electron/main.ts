@@ -87,6 +87,7 @@ import {
   dispatchBackgroundAgents, type ThinkingEmitter, type PipelinePath
 } from './services/chat-pipeline'
 import { loadPluginConfig, isHookDisabled, getPluginConfig } from './services/plugin-config'
+import { registerAllIPC } from './ipc'
 
 // V2: Efficiency Engine
 import { initCostSchema, recordUsage, estimateCost, getCompressionStats, getCostByProject, getDailyCosts } from './services/skills/efficiency/cost-tracker'
@@ -336,6 +337,18 @@ app.whenReady().then(() => {
     const db = getDb()
     projectQueries.updateName(db).run(newName, projectId)
     return true
+  })
+
+  ipcMain.handle('project:setAutoScanEnabled', (_event, projectId: string, enabled: boolean) => {
+    const db = getDb()
+    projectQueries.updateAutoScanEnabled(db).run(enabled ? 1 : 0, projectId)
+    return true
+  })
+
+  ipcMain.handle('project:getAutoScanEnabled', (_event, projectId: string) => {
+    const db = getDb()
+    const row = projectQueries.getById(db).get(projectId) as { auto_scan_enabled: number } | undefined
+    return row ? row.auto_scan_enabled === 1 : false
   })
 
   ipcMain.handle('project:stats', (_event, projectId: string) => {
@@ -1472,7 +1485,8 @@ Return ONLY the enhanced prompt, nothing else.`
         } catch (toolErr) {
           console.warn('[Chat] Failed to collect MCP tools (non-fatal):', toolErr)
         }
-        const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...codeAdvisorTools, ...perplexityTools]
+         const coreTools = [...builtinTools, ...projectTools, ...visionTools, ...artistTools, ...codeAdvisorTools, ...perplexityTools]
+           .filter((tool, index, arr) => arr.findIndex(t => t.function.name === tool.function.name) === index)
         let allTools: typeof coreTools
         if (forcePerplexityMode) {
           allTools = perplexityTools
@@ -2562,6 +2576,8 @@ Return ONLY the enhanced prompt, nothing else.`
   }
 
   createWindow()
+
+  registerAllIPC(ipcMain, app, () => mainWindow)
 
   setMainWindow(mainWindow)
 
