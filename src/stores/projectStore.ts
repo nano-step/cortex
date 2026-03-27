@@ -21,22 +21,23 @@ interface ProjectState {
   addProject: (name: string, sourceType: Project['sourceType'], sourcePath: string) => Promise<string | null>
   removeProject: (id: string) => Promise<void>
   renameProject: (id: string, name: string) => Promise<void>
+  setAutoScanEnabled: (id: string, enabled: boolean) => Promise<void>
   loadBranches: (repoId: string) => Promise<void>
   switchBranch: (projectId: string, repoId: string, branch: string) => Promise<boolean>
   getRepoBranch: (repoId: string) => RepoBranchState
 }
 
-/** Map DB row (snake_case) to frontend Project (camelCase) */
 function mapDbProject(row: any): Project {
   return {
     id: row.id,
     name: row.name,
     brainName: row.brain_name,
-    sourceType: 'local',  // will be enriched from repos
+    sourceType: 'local',
     sourcePath: '',
     brainStatus: 'idle',
     lastSyncAt: row.updated_at,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    autoScanEnabled: row.auto_scan_enabled !== 0
   }
 }
 
@@ -131,6 +132,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }))
     } catch (err) {
       console.error('Failed to rename project:', err)
+    }
+  },
+
+  setAutoScanEnabled: async (id, enabled) => {
+    if (!window.electronAPI?.setProjectAutoScanEnabled) return
+    try {
+      await window.electronAPI.setProjectAutoScanEnabled(id, enabled)
+      set((state) => ({
+        projects: state.projects.map((p) => (p.id === id ? { ...p, autoScanEnabled: enabled } : p))
+      }))
+    } catch (err) {
+      console.error('Failed to update autoScan setting:', err)
     }
   },
 

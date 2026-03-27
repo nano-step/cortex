@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, Brain, Globe, Zap, Loader2, Check, SkipForward, AlertCircle, ChevronDown, ChevronRight, Shield, Database, HardDrive } from 'lucide-react'
+import { Search, Brain, Globe, Zap, Loader2, Check, SkipForward, AlertCircle, ChevronDown, ChevronRight, Shield, Database, HardDrive, ListOrdered, Route, Bot, Cpu, GitBranch, Wrench } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 interface ThinkingStepData {
-  step: 'sanitize' | 'memory' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'cache' | 'streaming'
+  step: 'sanitize' | 'memory' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'cache' | 'streaming' | 'queue' | 'routing' | 'agent_init' | 'agent_mode' | 'orchestrate' | 'tool_call' | 'skill_chain' | 'background'
   status: 'running' | 'done' | 'skipped' | 'error'
   label: string
   detail?: string
@@ -14,7 +14,7 @@ interface ThinkingProcessProps {
   steps: ThinkingStepData[]
 }
 
-const STEP_ICONS: Record<ThinkingStepData['step'], typeof Brain> = {
+const STEP_ICONS: Record<string, typeof Brain> = {
   sanitize: Shield,
   memory: Database,
   rag: Brain,
@@ -23,6 +23,14 @@ const STEP_ICONS: Record<ThinkingStepData['step'], typeof Brain> = {
   build_prompt: Zap,
   cache: HardDrive,
   streaming: Loader2,
+  queue: ListOrdered,
+  routing: Route,
+  agent_init: Bot,
+  agent_mode: Bot,
+  orchestrate: Cpu,
+  tool_call: Wrench,
+  skill_chain: GitBranch,
+  background: Loader2,
 }
 
 function StatusIcon({ status }: { status: ThinkingStepData['status'] }) {

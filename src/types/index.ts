@@ -15,6 +15,7 @@ export interface Project {
   brainStatus: BrainStatus
   lastSyncAt: number | null
   createdAt: number
+  autoScanEnabled: boolean // per-project AutoScan/AutoTraining toggle
 }
 
 export interface ChatAttachment {
@@ -77,7 +78,7 @@ export interface SyncResult {
 
 export type FeedbackSignalType = 'thumbs_up' | 'thumbs_down' | 'copy' | 'follow_up_quick' | 'follow_up_slow' | 'no_follow_up'
 
-export type ThinkingStepId = 'sanitize' | 'memory' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'cache' | 'tool_call' | 'agent_init' | 'agent_mode' | 'orchestrate' | 'streaming' | 'routing'
+export type ThinkingStepId = 'sanitize' | 'memory' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'cache' | 'tool_call' | 'agent_init' | 'agent_mode' | 'orchestrate' | 'streaming' | 'routing' | 'queue'
 
 export type ThinkingStepStatus = 'running' | 'done' | 'skipped' | 'error'
 
@@ -331,6 +332,8 @@ declare global {
       getAllProjects: () => Promise<any[]>
       deleteProject: (projectId: string) => Promise<boolean>
       renameProject: (projectId: string, newName: string) => Promise<boolean>
+      setProjectAutoScanEnabled: (projectId: string, enabled: boolean) => Promise<boolean>
+      getProjectAutoScanEnabled: (projectId: string) => Promise<boolean>
       getProjectStats: (projectId: string) => Promise<any>
 
       // Repository import
@@ -495,6 +498,10 @@ declare global {
       getLearningStats: (projectId: string) => Promise<LearningStats>
       triggerLearning: (projectId: string) => Promise<{ trained: number; weights: number }>
       exportTrainingData: (projectId: string) => Promise<{ pairs: number; path: string } | null>
+      autoscanGetProgress?: () => Promise<import('../stores/autoscanStore').AutoScanProgress | null>
+      autoscanGetConfig?: () => Promise<import('../stores/autoscanStore').AutoScanConfig | null>
+      autoscanSetConfig?: (config: Partial<import('../stores/autoscanStore').AutoScanConfig>) => Promise<void>
+      autoscanTrigger?: (projectId: string) => Promise<void>
 
       // Agent Mode
       agentExecute?: (projectId: string, query: string, strategy?: string) => Promise<{ content: string }>
@@ -598,10 +605,13 @@ declare global {
       boulderUpdateCheckpoint: (loopId: string, checkpoint: Record<string, unknown>) => Promise<BoulderState>
 
       // V3: Agent Capabilities
-      capabilitiesGetAll: () => Promise<Record<string, AgentCapability>>
-      capabilitiesGet: (role: string) => Promise<AgentCapability | null>
-      capabilitiesCanDelegate: (from: string, to: string) => Promise<boolean>
-      capabilitiesDelegationHistory: (fromAgent?: string) => Promise<DelegationResult[]>
+       capabilitiesGetAll: () => Promise<Record<string, AgentCapability>>
+       capabilitiesGet: (role: string) => Promise<AgentCapability | null>
+       capabilitiesCanDelegate: (from: string, to: string) => Promise<boolean>
+       capabilitiesDelegationHistory: (fromAgent?: string) => Promise<DelegationResult[]>
+
+       getQueueStatus: () => Promise<Array<{ conversationId: string; queueLength: number; isProcessing: boolean }>>
+       clearQueue: (conversationId: string) => Promise<number>
     }
   }
 }

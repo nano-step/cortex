@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import {
   X, GraduationCap, RefreshCw, Loader2, CheckCircle,
-  TrendingUp, Zap, BarChart3, Play
+  TrendingUp, Zap, BarChart3, Play, Bot
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { useLearningStore } from '../../stores/learningStore'
+import { useProjectStore } from '../../stores/projectStore'
 
 interface LearningDashboardProps {
   open: boolean
@@ -15,13 +16,30 @@ interface LearningDashboardProps {
 
 export function LearningDashboard({ open, onClose, projectId }: LearningDashboardProps) {
   const { stats, training, loading, loadStats, triggerTraining } = useLearningStore()
+  const { projects, setAutoScanEnabled } = useProjectStore()
   const [refreshing, setRefreshing] = useState(false)
   const [trainResult, setTrainResult] = useState<{ trained: number; weights: number; optimized?: boolean } | null>(null)
+  const [togglingAutoScan, setTogglingAutoScan] = useState(false)
+
+  const currentProject = projectId ? projects.find(p => p.id === projectId) : null
+  const autoScanEnabled = currentProject?.autoScanEnabled ?? false
 
   useEffect(() => {
     if (!open || !projectId) return
     loadStats(projectId)
   }, [open, projectId, loadStats])
+
+  const handleAutoScanToggle = async () => {
+    if (!projectId || togglingAutoScan) return
+    setTogglingAutoScan(true)
+    const newEnabled = !autoScanEnabled
+    await setAutoScanEnabled(projectId, newEnabled)
+    await window.electronAPI?.autoscanSetConfig?.({ enabled: newEnabled })
+    if (newEnabled) {
+      await window.electronAPI?.autoscanTrigger?.(projectId)
+    }
+    setTogglingAutoScan(false)
+  }
 
   const handleRefresh = async () => {
     if (!projectId) return
@@ -81,6 +99,47 @@ export function LearningDashboard({ open, onClose, projectId }: LearningDashboar
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+          {currentProject && (
+            <div className={cn(
+              'flex items-center justify-between p-4 rounded-xl border transition-colors',
+              autoScanEnabled
+                ? 'bg-[var(--accent-light)] border-[var(--accent-primary)]/30'
+                : 'bg-[var(--bg-secondary)] border-[var(--border-primary)]'
+            )}>
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  'w-8 h-8 rounded-lg flex items-center justify-center',
+                  autoScanEnabled ? 'bg-[var(--accent-primary)]/20' : 'bg-[var(--bg-primary)]'
+                )}>
+                  <Bot size={16} className={autoScanEnabled ? 'text-[var(--accent-primary)]' : 'text-[var(--text-tertiary)]'} />
+                </div>
+                <div>
+                  <p className="text-[13px] font-semibold text-[var(--text-primary)]">Tự động học</p>
+                  <p className="text-[11px] text-[var(--text-tertiary)]">
+                    {autoScanEnabled ? 'AutoScan & AutoTraining đang chạy' : 'Tạm dừng — không scan dự án này'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleAutoScanToggle}
+                disabled={togglingAutoScan}
+                className={cn(
+                  'relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                  autoScanEnabled ? 'bg-[var(--accent-primary)]' : 'bg-[var(--border-secondary)]'
+                )}
+                aria-label={autoScanEnabled ? 'Tắt AutoScan' : 'Bật AutoScan'}
+              >
+                <span className={cn(
+                  'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm',
+                  'transition-transform duration-200',
+                  autoScanEnabled ? 'translate-x-5' : 'translate-x-0'
+                )} />
+              </button>
+            </div>
+          )}
+
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 size={24} className="animate-spin text-[var(--text-tertiary)]" />

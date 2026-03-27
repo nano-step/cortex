@@ -23,12 +23,12 @@ export interface AutoScanProgress {
 }
 
 const DEFAULT_CONFIG: AutoScanConfig = {
-  batchSize: 100,
+  batchSize: 20,
   judgeThreshold: 4.0,
   maxQuestionsPerChunk: 3,
   enableEvolInstruct: true,
   pauseDuringChat: true,
-  enabled: true
+  enabled: false
 }
 
 interface AutoScanState {
