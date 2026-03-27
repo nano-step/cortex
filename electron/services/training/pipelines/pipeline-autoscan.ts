@@ -1,5 +1,5 @@
 import type { TrainingPipeline, PipelineContext, PipelineResult } from '../types'
-import { getDb } from '../../db'
+import { getDb, projectQueries } from '../../db'
 import {
   runBatch,
   runCrystalBatch,
@@ -10,10 +10,16 @@ import {
   getTotalChunkCount
 } from '../../skills/learning/autoscan-engine'
 
-function getAllProjectIds(): string[] {
+function getAutoScanEnabledProjectIds(): string[] {
   const db = getDb()
-  const rows = db.prepare('SELECT id FROM projects').all() as Array<{ id: string }>
+  const rows = projectQueries.getAllAutoScanEnabled(db).all() as Array<{ id: string }>
   return rows.map(r => r.id)
+}
+
+function isProjectAutoScanEnabled(projectId: string): boolean {
+  const db = getDb()
+  const row = projectQueries.getById(db).get(projectId) as { auto_scan_enabled: number } | undefined
+  return row ? row.auto_scan_enabled === 1 : false
 }
 
 async function execute(context: PipelineContext): Promise<PipelineResult> {
@@ -30,7 +36,9 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
   let totalPairsRejected = 0
 
   try {
-    const projectIds = context.projectId ? [context.projectId] : getAllProjectIds()
+    const projectIds = context.projectId
+      ? (isProjectAutoScanEnabled(context.projectId) ? [context.projectId] : [])
+      : getAutoScanEnabledProjectIds()
 
     for (const projectId of projectIds) {
       const totalChunks = getTotalChunkCount(projectId)

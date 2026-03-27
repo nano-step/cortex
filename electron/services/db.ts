@@ -104,6 +104,20 @@ const MIGRATIONS: Migration[] = [
     ],
     disableForeignKeys: true
   },
+  {
+    version: 5,
+    description: 'Add per-project auto_scan_enabled toggle',
+    sql: [
+      `ALTER TABLE projects ADD COLUMN auto_scan_enabled INTEGER NOT NULL DEFAULT 0`,
+    ]
+  },
+  {
+    version: 6,
+    description: 'Reset auto_scan_enabled to off by default for all existing projects',
+    sql: [
+      `UPDATE projects SET auto_scan_enabled = 0`,
+    ]
+  },
 ]
 
 function runMigrations(database: Database.Database): void {
@@ -431,7 +445,13 @@ export const projectQueries = {
     db.prepare('DELETE FROM projects WHERE id = ?'),
 
   updateName: (db: Database.Database) =>
-    db.prepare('UPDATE projects SET name = ?, updated_at = unixepoch() * 1000 WHERE id = ?')
+    db.prepare('UPDATE projects SET name = ?, updated_at = unixepoch() * 1000 WHERE id = ?'),
+
+  updateAutoScanEnabled: (db: Database.Database) =>
+    db.prepare('UPDATE projects SET auto_scan_enabled = ?, updated_at = unixepoch() * 1000 WHERE id = ?'),
+
+  getAllAutoScanEnabled: (db: Database.Database) =>
+    db.prepare('SELECT id FROM projects WHERE auto_scan_enabled = 1'),
 }
 
 export const repoQueries = {

@@ -86,19 +86,19 @@ export interface TrainingEngineStatus {
 export const ALL_PIPELINES: PipelineName[] = ['reranker', 'prompt', 'instinct', 'agent', 'crystal', 'memory', 'embedding', 'autoscan']
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
-  enabled: true,
+  enabled: false,
   idleThresholdMinutes: 5,
   globalIntervalMs: 30 * 60 * 1000,
   maxConcurrentJobs: 1,
   pauseDuringChat: true,
   pipelines: {
-    reranker: { enabled: true, intervalMs: 15 * 60 * 1000, thresholdCount: 20, idleMinutes: 3 },
-    prompt: { enabled: true, intervalMs: 60 * 60 * 1000, thresholdCount: 50, idleMinutes: 10 },
-    instinct: { enabled: true, intervalMs: 30 * 60 * 1000, thresholdCount: 0, idleMinutes: 5 },
-    agent: { enabled: true, intervalMs: 60 * 60 * 1000, thresholdCount: 30, idleMinutes: 10 },
-    crystal: { enabled: true, intervalMs: 45 * 60 * 1000, thresholdCount: 0, idleMinutes: 10 },
-    memory: { enabled: true, intervalMs: 2 * 60 * 60 * 1000, thresholdCount: 0, idleMinutes: 15 },
-    embedding: { enabled: true, intervalMs: 4 * 60 * 60 * 1000, thresholdCount: 0, idleMinutes: 20 },
-    autoscan: { enabled: true, intervalMs: 0, thresholdCount: 0, idleMinutes: 2 }
+    reranker: { enabled: false, intervalMs: 15 * 60 * 1000, thresholdCount: 20, idleMinutes: 3 },
+    prompt: { enabled: false, intervalMs: 60 * 60 * 1000, thresholdCount: 50, idleMinutes: 10 },
+    instinct: { enabled: false, intervalMs: 30 * 60 * 1000, thresholdCount: 0, idleMinutes: 5 },
+    agent: { enabled: false, intervalMs: 60 * 60 * 1000, thresholdCount: 30, idleMinutes: 10 },
+    crystal: { enabled: false, intervalMs: 45 * 60 * 1000, thresholdCount: 0, idleMinutes: 10 },
+    memory: { enabled: false, intervalMs: 2 * 60 * 60 * 1000, thresholdCount: 0, idleMinutes: 15 },
+    embedding: { enabled: false, intervalMs: 4 * 60 * 60 * 1000, thresholdCount: 0, idleMinutes: 20 },
+    autoscan: { enabled: false, intervalMs: 0, thresholdCount: 0, idleMinutes: 10 }
   }
 }

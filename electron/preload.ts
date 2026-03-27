@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('project:delete', projectId),
   renameProject: (projectId: string, newName: string) =>
     ipcRenderer.invoke('project:rename', projectId, newName),
+  setProjectAutoScanEnabled: (projectId: string, enabled: boolean) =>
+    ipcRenderer.invoke('project:setAutoScanEnabled', projectId, enabled),
+  getProjectAutoScanEnabled: (projectId: string) =>
+    ipcRenderer.invoke('project:getAutoScanEnabled', projectId),
   getProjectStats: (projectId: string) =>
     ipcRenderer.invoke('project:stats', projectId),
 
@@ -236,6 +240,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   exportTrainingData: (projectId: string) =>
     ipcRenderer.invoke('learning:exportData', projectId),
 
+  // AutoScan & AutoTraining Engine
+  autoscanGetProgress: () =>
+    ipcRenderer.invoke('autoscan:progress'),
+  autoscanGetConfig: () =>
+    ipcRenderer.invoke('autoscan:config:get'),
+  autoscanSetConfig: (config: Record<string, unknown>) =>
+    ipcRenderer.invoke('autoscan:config:set', config),
+  autoscanTrigger: (projectId: string) =>
+    ipcRenderer.invoke('autoscan:trigger', projectId),
+
   // GitHub
   getGitHubPAT: () => ipcRenderer.invoke('github:getPAT'),
   setGitHubPAT: (token: string) => ipcRenderer.invoke('github:setPAT', token),
@@ -427,4 +441,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('capabilities:canDelegate', from, to),
   capabilitiesDelegationHistory: (fromAgent?: string) =>
     ipcRenderer.invoke('capabilities:delegationHistory', fromAgent),
+
+  // Message Queue
+  getQueueStatus: () =>
+    ipcRenderer.invoke('queue:status'),
+  clearQueue: (conversationId: string) =>
+    ipcRenderer.invoke('queue:clear', conversationId),
 })
