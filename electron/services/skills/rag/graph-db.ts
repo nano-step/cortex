@@ -51,6 +51,10 @@ export const graphNodeQueries = {
     db.prepare('SELECT * FROM graph_nodes WHERE id = ?'),
   delete: (db: Database.Database) =>
     db.prepare('DELETE FROM graph_nodes WHERE project_id = ?'),
+  deleteByFilePath: (db: Database.Database) =>
+    db.prepare('DELETE FROM graph_nodes WHERE project_id = ? AND file_path = ?'),
+  getIdsByFilePath: (db: Database.Database) =>
+    db.prepare('SELECT id FROM graph_nodes WHERE project_id = ? AND file_path = ?'),
   updateEmbedding: (db: Database.Database) =>
     db.prepare('UPDATE graph_nodes SET embedding = ? WHERE id = ?'),
   count: (db: Database.Database) =>
@@ -67,7 +71,12 @@ export const graphEdgeQueries = {
   getByProject: (db: Database.Database) =>
     db.prepare('SELECT * FROM graph_edges WHERE project_id = ?'),
   delete: (db: Database.Database) =>
-    db.prepare('DELETE FROM graph_edges WHERE project_id = ?')
+    db.prepare('DELETE FROM graph_edges WHERE project_id = ?'),
+  deleteByNodeIds: (db: Database.Database, nodeIds: string[]) => {
+    if (nodeIds.length === 0) return
+    const ph = nodeIds.map(() => '?').join(',')
+    db.prepare(`DELETE FROM graph_edges WHERE source_id IN (${ph}) OR target_id IN (${ph})`).run(...nodeIds, ...nodeIds)
+  }
 }
 
 export function getNodeNeighbors(nodeId: string, depth: number = 2): string[] {
