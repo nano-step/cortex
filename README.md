@@ -4,14 +4,17 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.3.0%20Dendrite-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.3.0%20Synapse-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
 
 A desktop AI assistant that deeply understands your entire codebase — not a ChatGPT wrapper, but a full engineering intelligence platform with persistent memory, multi-agent orchestration, and self-learning.
 
-[⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](ARCHITECTURE.md) · [📦 Skill Catalog](SKILL_CATALOG.md) · [🗺️ Strategy](STRATEGY.md)
+[⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](ARCHITECTURE.md) · [📦 Skill Catalog](SKILL_CATALOG.md)
+
+**What's new in v4.3.0 "Synapse":**
+Document Intelligence (PDF/DOCX/XLSX/CSV) · Agent Brain upgraded with 10 Core Policies · Filesystem Tools overhauled (9 tools, batch I/O) · 429 Rate Limit Resilience · 15 agents upgraded with production policies
 
 </div>
 
@@ -29,7 +32,7 @@ Most "AI coding tools" are thin wrappers: paste code → send to API → show re
 | One model, one response | **12 agents** with different strategies, multiple models, parallel execution |
 | No context beyond pasted code | **Index your entire repo** — AST parsing, dependency graphs, vector embeddings, git history |
 
-**The difference shows in practice** (v4.3.0 Dendrite — self-trains 24/7):
+**The difference shows in practice** (v4.3.0 Synapse — Document Intelligence + Core Policies):
 
 ```
 // ChatGPT wrapper response to "How to add pagination?":
@@ -88,7 +91,7 @@ User Query
 [Hook: after:chat] — validate response, save memory, audit log
 ```
 
-### Layer 3: Tools (25+ Built-in)
+### Layer 3: Tools (30+ Built-in)
 
 Cortex doesn't just answer from knowledge — it **acts**:
 
@@ -96,10 +99,11 @@ Cortex doesn't just answer from knowledge — it **acts**:
 |---|---|---|
 | **Code Advisor** | `code_advisor`, `find_similar_code`, `suggest_fix`, `explain_code_pattern` | TabNine-inspired: search codebase patterns → detect conventions → style-matched suggestions |
 | **Project Analysis** | `git_contributors`, `git_log_search`, `grep_search`, `project_stats`, `search_config` | Answer questions RAG can't: team size, git history, exact config values |
+| **Document Intelligence** | `read_document` | Read PDF, DOCX, XLSX, CSV, HTML at query time — 10MB limit, section-aware chunking |
 | **Vision** | `analyze_image`, `compare_images` | FREE image analysis via OpenRouter (healer-alpha, hunter-alpha) |
 | **Artist** | `generate_image`, `edit_image` | AI image generation with 8 style presets (anime, watercolor, pixel-art...) |
 | **Web** | `perplexity_search`, `perplexity_read_url` | Real-time web search and URL reading |
-| **File System** | `cortex_read_file`, `cortex_write_file`, `cortex_edit_file`, `cortex_read_files`, `cortex_grep_search`, `cortex_edit_files`, `cortex_list_directory`, `cortex_move_file`, `cortex_delete_file` | Full read/write/search — supports chunk reading (10MB), batch parallel I/O, progressive edit fallback, unrestricted mode |
+| **File System** | `read_file`, `write_file`, `edit_file`, `read_files` (batch), `grep_search`, `edit_files` (batch), `list_directory`, `move_file`, `delete_file` | Full read/write/search — chunk reading (10MB), batch parallel I/O, progressive edit fallback, unrestricted mode |
 
 ### Layer 4: Memory (3-Tier Persistent)
 
@@ -142,23 +146,27 @@ Learned Reranker → Adjusts search result weights
 Over time: results align with what YOU find useful
 ```
 
-### Layer 7: Auto-Training — Dendrite Engine (v4.3.0)
+### Layer 7: Auto-Training — Dendrite Engine
 
 Cortex now trains itself **24/7 without user interaction**:
 
 ```
 App idle (2+ min)
     ↓
-[AutoScan] Read codebase chunks in batches (100/batch)
+[Circuit Breaker Check] — 3 failures? Open 30 min. Budget exceeded? Pause until midnight.
+    ↓
+[AutoScan] Read codebase chunks in batches (20/batch)
     ↓
 [AutoTraining] Generate Q&A pairs via LLM (Self-Instruct style)
     ├── 3 question types: factual / conceptual / relational
     ├── Evol-Instruct: 30% chance mutate to harder questions
-    └── LLM-as-Judge: score 4 criteria (1-5), accept if avg ≥ 4.0
+    └── LLM-as-Judge (independent model): 4 criteria (1-5), accept if avg ≥ 4.0
     ↓
 [AutoScan] Scan Jira issues → sprint/bug/team Q&A pairs
 [AutoScan] Scan Confluence pages → technical/architecture Q&A pairs
 [AutoScan] Scan Knowledge Crystals → insight Q&A pairs
+    ↓
+[Bias Prevention] ROUGE-1 diversity check (reject if >70% similar to existing)
     ↓
 [Learning] Save accepted pairs → training_pairs + archival_memory
     ↓
@@ -171,6 +179,17 @@ App idle (2+ min)
 - Technical documentation, design decisions (from Confluence)
 - Accumulated knowledge crystals from past conversations
 
+**Circuit Breaker** — protects against runaway costs:
+- 3 consecutive LLM failures → pause 30 min (half-open probe → resume if ok)
+- Daily budget exceeded ($0.50 default) → pause until midnight reset
+- Live status visible in AutoScan dashboard: state / daily cost / budget
+
+**Bias Prevention** — keeps training data healthy:
+- ROUGE-1 similarity check: rejects pairs too similar to existing (>70%)
+- Independent judge model: generation model ≠ judge model
+- Confidence decay: 10%/month for unconfirmed pairs
+- Low-confidence pairs (< 0.3) archived automatically
+
 **Logging** — all training activity visible in CLI console:
 ```
 [AutoScan][25/03/2026 23:14:07]   [Code] Batch offset=8700 | 100 chunks
@@ -178,6 +197,7 @@ App idle (2+ min)
 [AutoTraining][25/03/2026 23:14:11] [Code/factual] services/llm-client.ts | Q: "What does..."
 [Learning][25/03/2026 23:14:14]   Luu pair | score=4.3 | "What does sanitizeTemperature do..."
 [AutoScan][25/03/2026 23:14:35]   [Jira] 18 issues | bat dau phan tich sprint/bug/team...
+[Circuit] OPEN — daily budget $0.51 exceeded $0.50
 ```
 
 ---
@@ -237,21 +257,50 @@ App idle (2+ min)
 
 ## Configuration
 
-Cortex supports 7 configurable services. Each user gets their own encrypted data store.
+Cortex supports 9 configurable services. Each user gets their own encrypted data store (`~/Library/Application Support/Cortex/`).
 
-> **📖 Full setup guide with exact URLs for every API key: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)**
+> **📖 Full setup guide with exact URLs: [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md)**
 
 | Service | Required? | Free? | Purpose |
 |---------|:---------:|:-----:|---------|
-| **LLM Proxy** | ✅ | Team key | Chat, analysis, code suggestions |
-| **Voyage AI** | ✅ Recommended | 200M tokens/month | Embedding for RAG search |
-| **Qdrant** | Optional | Docker local | Faster vector search |
-| **OpenRouter** | Optional | Vision free | Image analysis + generation |
+| **LLM Proxy** | ✅ | Team key | Chat, analysis, all AI responses |
+| **Voyage AI** | ✅ Recommended | 200M tokens/month | Bulk embedding for indexing |
+| **GitHub Models** | ✅ Recommended | Free (Copilot) | Query-time embedding (search) |
+| **Qdrant** | Optional | Docker local | Faster vector search for large repos |
+| **OpenRouter** | Optional | Vision free | Image analysis + image generation |
 | **Atlassian** | Optional | API token | Jira issues + Confluence docs |
-| **GitHub** | Optional | Free PAT | PR review + code context |
-| **Perplexity** | Optional | Pro account | Web search + URL reading |
+| **GitHub PAT** | Optional | Free | PR review, org import, code context |
+| **Perplexity** | Optional | Pro account | Real-time web search + URL reading |
+| **Ollama** | Optional | Free (local) | Offline embedding fallback |
 
-Use `settings:healthCheck` to verify all services at once.
+**Embedding strategy** — Cortex uses a hybrid approach:
+- **Indexing**: Voyage AI (3M TPM, fast bulk) → falls back to Ollama → LLM proxy
+- **Search/Query**: GitHub Models (free, 14 RPM) → falls back to Voyage AI
+
+Use **Settings → Health Check** to verify all services at once with latency measurements.
+
+### Quick Setup (5 minutes)
+
+```bash
+# 1. Configure LLM proxy (required)
+Settings → Proxy → URL + Key → Test Connection
+
+# 2. Voyage AI embedding (recommended, free 200M tokens/month)
+dash.voyageai.com → API Keys → copy pa-xxxxx
+Settings → Voyage AI → paste key
+
+# 3. GitHub Models embedding (free with Copilot)
+github.com/settings/tokens → Fine-grained PAT → models:read permission
+Settings → GitHub → paste token → enable "GitHub Models Embedding"
+
+# 4. Optional: Qdrant for faster search on large repos
+docker run -d --name qdrant -p 6333:6333 -v ~/qdrant-data:/qdrant/storage qdrant/qdrant
+Settings → Qdrant → http://localhost:6333
+
+# 5. Optional: Ollama for offline embedding fallback
+ollama pull nomic-embed-text
+Settings → Ollama → http://localhost:11434
+```
 
 ---
 
@@ -261,28 +310,105 @@ Use `settings:healthCheck` to verify all services at once.
 
 Download the `.dmg` from [Releases](https://github.com/hoainho/cortex/releases), drag to `/Applications`.
 
-### 2. Configure
+### 2. Configure (see [Setup Guide](docs/SETUP_GUIDE.md))
 
-Follow the [Setup Guide](docs/SETUP_GUIDE.md) to configure your API keys.
+Minimum required: LLM Proxy URL + Key (Settings → Proxy).
+Recommended: add Voyage AI key + GitHub PAT for full embedding support.
 
-**Embedding setup (recommended):**
+### 3. Import a Project
 
-| Provider | Purpose | How to get |
-|----------|---------|-----------|
-| **Voyage AI** (bulk) | Fast indexing — 1500 RPM, 200M free tokens | [voyageai.com](https://dash.voyageai.com/) → API Keys |
-| **GitHub Models** (query) | Free search/query — included with Copilot | [github.com/settings/tokens](https://github.com/settings/tokens) → Fine-grained PAT with `models:read` |
+| Source | How |
+|--------|-----|
+| Local folder | New Project → Import Local → select folder |
+| GitHub repo | New Project → Import GitHub → paste URL (+ PAT for private) |
+| GitHub org | New Project → Import Organization → paste org URL + PAT |
+| Jira project | Settings → Atlassian → configure → Import Jira |
+| Confluence space | Settings → Atlassian → configure → Import Confluence |
 
-Settings → Enter Voyage API Key + enable "GitHub Models Embedding" checkbox + enter GitHub PAT.
-
-Cortex uses **hybrid strategy**: Voyage handles bulk import (fast, high-limit), GitHub handles daily search/query (free, no cost).
-
-### 3. Create a Project
-
-Import from local folder, GitHub URL, or **entire GitHub Organization** (bulk import). Cortex indexes the full codebase.
+Cortex indexes the full codebase: AST parsing → chunking → embedding → vector search.
 
 ### 4. Start Using
 
-Ask questions, use `/` slash commands, upload images, drag-drop files. Cortex understands your code.
+**Ask anything about your code:**
+```
+How does authentication work?
+Where is rate limiting implemented?
+What's the database schema for users?
+```
+
+**Use slash commands for specialized workflows:**
+```
+/review      — 4-perspective PR review (security, quality, performance, testing)
+/security    — vulnerability analysis
+/implement   — implement a feature matching your codebase conventions
+/refactor    — intelligent refactoring with LSP verification
+/perplexity  — real-time web search
+/multi-agent — full team of 8 agents in parallel
+```
+
+**Upload images or drag-drop files** — Cortex analyzes images (free) and reads documents (PDF, DOCX, XLSX, CSV).
+
+**Use agent modes** (toolbar or `/agents` command):
+- **Sisyphus** — relentless executor, works until complete
+- **Hephaestus** — deep root-cause analysis, systematic debugging
+- **Prometheus** — strategic planner, requires approval before implementing
+- **Atlas** — parallel heavy lifter for multi-file operations
+
+### 5. Enable AutoScan (Optional)
+
+Project Settings → Enable AutoScan → Cortex starts training itself from your codebase 24/7.
+Check progress: Learning Dashboard → AutoScan tab (shows pairs generated, budget used, circuit state).
+
+---
+
+## What's New in v4.3.0 "Synapse"
+
+### Document Intelligence
+- `cortex_read_document` tool: read PDF, DOCX, XLSX/XLS, CSV, HTML at query time
+- Priority-based converter registry with graceful degradation
+- `chunkDocument()` — section-aware chunking by H1–H3 headers
+- Brain engine Phase 1.5: documents converted to markdown before embedding
+- `DocumentMetadataHeader` UI: file icon, filename, page/sheet/row count badges
+
+### Agent Brain Upgrade — 10 Core Policies
+Distilled from Claude Code, Cursor v1–v2, Devin AI, Windsurf Cascade:
+- `[autonomous-loop]` — Work until COMPLETE, no premature stopping
+- `[tool-first-policy]` — NEVER guess file contents; use tools
+- `[parallel-execution]` — All independent tool calls fired simultaneously
+- `[anti-hallucination]` — Never invent file names, APIs, or dependencies
+- `[verbosity-calibration]` — No preamble, no filler
+- All 15 agents upgraded with `CORE_POLICIES`
+
+### Filesystem Tools Overhaul (4 → 9 tools)
+- `cortex_read_files` — batch read up to 10 files via `Promise.all`
+- `cortex_grep_search` — regex search across entire project, auto-skips `node_modules`
+- `cortex_edit_files` — batch apply multiple edits across multiple files
+- `cortex_move_file` — safe rename/move with auto-mkdir
+- `cortex_delete_file` — sandbox-safe deletion
+- Upgraded `cortex_read_file`: 10MB limit, `offset`+`limit` chunk reading
+- Upgraded `cortex_list_directory`: `recursive`, `depth`, `extensions` filter
+- Progressive edit fallback: exact → whitespace-normalized → nearest-line hint
+
+### Unrestricted Mode
+New setting: `filesystem_unrestricted_mode` — AI can read/write any file on the machine.
+
+### 429 Rate Limit Resilience
+- Dynamic model resolution: queries `getAvailableModels()` instead of hardcoded names
+- Tier-based selection: `fast` → tier 1–5, `balanced` → tier 5–7, `premium` → tier 8–10
+- Auto-discover fallback: if no model in tier range → use any ready model
+- Exponential backoff with jitter for all agent pool calls
+
+### Architecture Improvements (from hardening roadmap)
+- **IPC Modules**: `main.ts` split into 9 domain modules (`electron/ipc/`)
+- **HybridVectorStore**: unified interface, auto-selects Qdrant → SQLite with large-project warning
+- **Circuit Breaker**: timed open/half-open/close states + daily budget guard
+- **Graph Incremental Rebuild**: `rebuildGraphForFiles()` on every sync (no more stale graph)
+- **Cache Invalidation**: semantic cache auto-invalidated per-project after sync
+- **Bias Prevention**: ROUGE-1 diversity, independent judge model, confidence decay
+- **Brain Snapshot**: auto-snapshot before re-index, restore to previous state (3 kept)
+- **Ollama Embedding**: local fallback provider via `nomic-embed-text`
+- **Resource Lock**: multi-agent file write protection + `OrchestrationBudget` guard
+- **IPC Validation**: lightweight schema validation on all critical IPC handlers
 
 ---
 
@@ -303,6 +429,38 @@ npm run dev
 | `npm run test` | Run unit tests |
 | `npm run test:watch` | Run tests in watch mode |
 
+### Project Structure
+
+```
+electron/
+  ipc/                  # IPC domain modules (brain, memory, chat, skills, settings...)
+  services/
+    agents/             # 12 agents + resource-lock.ts
+    memory/             # 3-tier memory (core, archival, recall)
+    skills/             # 30+ skills, MCP, efficiency, learning, RAG
+    storage/            # VectorStore interface + HybridVectorStore + BrainSnapshot
+  main.ts               # App lifecycle + chat:send pipeline
+
+src/
+  components/           # React UI: chat, agent, memory, skills, efficiency, settings
+  stores/               # Zustand: chat, project, skill, cost, memory, learning
+```
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| "Embedding rate limited (429)" | Settings → Voyage AI → paste key. Or enable GitHub Models Embedding. |
+| "No agents produced results" | Settings → Proxy → Test Connection. Check proxy URL + key. |
+| "Qdrant connection refused" | `docker start qdrant` — Qdrant container not running. |
+| AutoScan not running | Circuit breaker may be open. Check Learning Dashboard → AutoScan tab → circuit state. |
+| Slow search on large repo | Enable Qdrant (Docker). HybridVectorStore warns when >50K chunks without Qdrant. |
+| Brain data wrong after sync | Brain Snapshot: use Settings → Brain → Restore Snapshot to roll back. |
+| Knowledge graph stale | Graph now auto-rebuilds incrementally on every sync (since v4.3.0). |
+| Image analysis not working | Settings → OpenRouter → add key. Vision is free (healer-alpha model). |
+
 ---
 
 ## Tech Stack
@@ -311,11 +469,13 @@ npm run dev
 |-------|-----------|
 | Desktop | Electron 33 |
 | Frontend | React 18, TypeScript 5.7, Tailwind CSS 3.4, Zustand 5 |
-| Database | SQLite (better-sqlite3) + Qdrant (Docker) |
-| Embeddings | Voyage AI (bulk) + GitHub Models (query) — 1024 dims, hybrid strategy |
-| Code Parsing | Tree-sitter (web-tree-sitter) |
-| LLM | OpenAI-compatible API via proxy (multi-model routing) |
-| Tools | MCP Protocol, Playwright, Git CLI |
+| Database | SQLite (better-sqlite3) + Qdrant (optional, Docker) |
+| Embeddings | Voyage AI (bulk, 1024-dim) + GitHub Models (query, free) + Ollama (local fallback) |
+| Vector Storage | HybridVectorStore: Qdrant → SQLite BLOB with cosine similarity |
+| Code Parsing | Tree-sitter (web-tree-sitter), 20+ languages |
+| Document Parsing | pdf-parse, mammoth (DOCX), xlsx, turndown (HTML) |
+| LLM | OpenAI-compatible proxy (multi-model routing, tier-based selection) |
+| External Tools | MCP Protocol, Playwright, Git CLI, Atlassian REST API |
 | Build | electron-vite, electron-builder |
 
 ---
