@@ -11,7 +11,7 @@ import { initTrainingSchema, insertRun, startRun, completeRun, getLastRunTime, r
 import { startScheduler, stopScheduler, notifyPostChat, notifyEvent, notifyChatStarted, notifyChatEnded, getSchedulerStatus } from './training-scheduler'
 
 const AUTOSCAN_NORMAL_INTERVAL_MS = 5_000
-const CIRCUIT_OPEN_RETRY_MS = 5 * 60 * 1000
+const CIRCUIT_OPEN_RETRY_MS = 31 * 60 * 1000
 const CIRCUIT_HALF_OPEN_RETRY_MS = 30_000
 
 let mainWindow: BrowserWindow | null = null
