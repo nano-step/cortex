@@ -178,6 +178,13 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  registerAllIPC(ipcMain, app, () => mainWindow)
+
+  const _originalHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]) => {
+    try { return _originalHandle(channel, listener) } catch { }
+  }
+
   // Initialize database
   try {
     getDb()
@@ -2576,8 +2583,6 @@ Return ONLY the enhanced prompt, nothing else.`
   }
 
   createWindow()
-
-  registerAllIPC(ipcMain, app, () => mainWindow)
 
   setMainWindow(mainWindow)
 

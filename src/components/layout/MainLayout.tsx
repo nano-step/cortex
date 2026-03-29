@@ -9,6 +9,7 @@ import { OnboardingWizard } from '../onboarding/OnboardingWizard'
 import { MemoryDashboard } from '../memory/MemoryDashboard'
 import { SkillManager } from '../skills/SkillManager'
 import { LearningDashboard } from '../learning/LearningDashboard'
+import { TrainingIntelligencePanel } from '../learning/TrainingIntelligencePanel'
 import { AgentPanel } from '../agent/AgentPanel'
 import { useUIStore } from '../../stores/uiStore'
 import { useProjectStore } from '../../stores/projectStore'
@@ -23,7 +24,8 @@ export function MainLayout() {
     memoryOpen, setMemoryOpen,
     skillsOpen, setSkillsOpen,
     learningOpen, setLearningOpen,
-    agentOpen, setAgentOpen
+    agentOpen, setAgentOpen,
+    trainingIntelligenceOpen, setTrainingIntelligenceOpen
   } = useUIStore()
   const { loadProjects, activeProjectId } = useProjectStore()
   const [onboardingChecked, setOnboardingChecked] = useState(false)
@@ -70,6 +72,7 @@ export function MainLayout() {
       <MemoryDashboard open={memoryOpen} onClose={() => setMemoryOpen(false)} projectId={activeProjectId} />
       <SkillManager open={skillsOpen} onClose={() => setSkillsOpen(false)} />
       <LearningDashboard open={learningOpen} onClose={() => setLearningOpen(false)} projectId={activeProjectId} />
+      <TrainingIntelligencePanel open={trainingIntelligenceOpen} onClose={() => setTrainingIntelligenceOpen(false)} projectId={activeProjectId} />
       <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} projectId={activeProjectId} />
     </div>
   )

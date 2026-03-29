@@ -16,6 +16,7 @@ interface UIState {
   learningOpen: boolean
   costOpen: boolean
   agentOpen: boolean
+  trainingIntelligenceOpen: boolean
 
   toggleSidebar: () => void
   setMode: (mode: ResponseMode) => void
@@ -32,6 +33,7 @@ interface UIState {
   setLearningOpen: (open: boolean) => void
   setCostOpen: (open: boolean) => void
   setAgentOpen: (open: boolean) => void
+  setTrainingIntelligenceOpen: (open: boolean) => void
 }
 
 // Load persisted theme from localStorage
@@ -68,6 +70,7 @@ export const useUIStore = create<UIState>((set) => ({
   learningOpen: false,
   costOpen: false,
   agentOpen: false,
+  trainingIntelligenceOpen: false,
 
   toggleSidebar: () =>
     set((state) => ({
@@ -100,5 +103,6 @@ export const useUIStore = create<UIState>((set) => ({
   setSkillsOpen: (open) => set({ skillsOpen: open }),
   setLearningOpen: (open) => set({ learningOpen: open }),
   setCostOpen: (open) => set({ costOpen: open }),
-  setAgentOpen: (open) => set({ agentOpen: open })
+  setAgentOpen: (open) => set({ agentOpen: open }),
+  setTrainingIntelligenceOpen: (open) => set({ trainingIntelligenceOpen: open })
 }))
