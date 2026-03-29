@@ -9,7 +9,10 @@ import {
   getAutoScanConfig,
   setAutoScanProgress,
   getTotalChunkCount,
-  getCircuitStatus
+  getCircuitStatus,
+  getScanOffset,
+  advanceScanOffset,
+  resetScanOffset
 } from '../../skills/learning/autoscan-engine'
 
 function getAutoScanEnabledProjectIds(): string[] {
@@ -54,14 +57,27 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
         currentProjectId: projectId
       })
 
-      console.log(`[AutoScan] Project ${projectId}: ${totalChunks} chunks, ${totalBatches} batches`)
+      let offset = getScanOffset(projectId)
+      if (offset >= totalChunks) {
+        resetScanOffset(projectId)
+        offset = 0
+      }
 
-      let offset = 0
-      let batchIndex = 0
+      console.log(`[AutoScan] Project ${projectId}: ${totalChunks} chunks, ${totalBatches} batches, resuming at offset=${offset}`)
+
+      setAutoScanProgress({
+        phase: 'chunks',
+        currentBatch: Math.floor(offset / scanConfig.batchSize),
+        totalBatches,
+        isRunning: true,
+        currentProjectId: projectId
+      })
+
+      let batchIndex = Math.floor(offset / scanConfig.batchSize)
 
       while (offset < totalChunks) {
         if (getCircuitStatus().state === 'open') {
-          console.log(`[AutoScan] Circuit breaker OPEN — dừng toàn bộ scan job (project=${projectId})`)
+          console.log(`[AutoScan] Circuit breaker OPEN — dừng toàn bộ scan job (project=${projectId}, saved offset=${offset})`)
           break
         }
 
@@ -83,7 +99,12 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
 
         if (batchResult.chunksScanned === 0) break
         offset += scanConfig.batchSize
+        advanceScanOffset(projectId, scanConfig.batchSize)
         batchIndex++
+      }
+
+      if (offset >= totalChunks) {
+        resetScanOffset(projectId)
       }
 
       if (getCircuitStatus().state === 'open') {

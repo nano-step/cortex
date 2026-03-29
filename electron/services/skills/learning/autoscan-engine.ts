@@ -730,6 +730,20 @@ export async function runCrystalBatch(projectId: string): Promise<AutoScanBatchR
  }
 }
 
+const scanOffsets = new Map<string, number>()
+
+export function getScanOffset(projectId: string): number {
+ return scanOffsets.get(projectId) ?? 0
+}
+
+export function advanceScanOffset(projectId: string, batchSize: number): void {
+ scanOffsets.set(projectId, (scanOffsets.get(projectId) ?? 0) + batchSize)
+}
+
+export function resetScanOffset(projectId: string): void {
+ scanOffsets.delete(projectId)
+}
+
 export function getTotalChunkCount(projectId: string): number {
  try {
  const db = getDb()

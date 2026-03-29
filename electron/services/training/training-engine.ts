@@ -6,8 +6,13 @@ import type {
 } from './types'
 import { createAutoscanPipeline } from './pipelines/pipeline-autoscan'
 import { DEFAULT_SCHEDULER_CONFIG, ALL_PIPELINES } from './types'
+import { getCircuitStatus } from '../skills/learning/autoscan-engine'
 import { initTrainingSchema, insertRun, startRun, completeRun, getLastRunTime, recordMetric, getRunCountByPipeline } from './training-db'
 import { startScheduler, stopScheduler, notifyPostChat, notifyEvent, notifyChatStarted, notifyChatEnded, getSchedulerStatus } from './training-scheduler'
+
+const AUTOSCAN_NORMAL_INTERVAL_MS = 5_000
+const CIRCUIT_OPEN_RETRY_MS = 5 * 60 * 1000
+const CIRCUIT_HALF_OPEN_RETRY_MS = 30_000
 
 let mainWindow: BrowserWindow | null = null
 let engineRunning = false
@@ -198,7 +203,13 @@ async function processQueue(): Promise<void> {
       currentJob = null
 
       if (job.pipeline === 'autoscan' && result.success && engineRunning) {
-        setTimeout(() => enqueueJob('autoscan', 'interval'), 5_000)
+        const circuit = getCircuitStatus()
+        const delayMs = circuit.state === 'open'
+          ? CIRCUIT_OPEN_RETRY_MS
+          : circuit.state === 'half-open'
+            ? CIRCUIT_HALF_OPEN_RETRY_MS
+            : AUTOSCAN_NORMAL_INTERVAL_MS
+        setTimeout(() => enqueueJob('autoscan', 'interval'), delayMs)
       }
 
       await yieldToEventLoop()
