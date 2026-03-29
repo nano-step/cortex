@@ -416,7 +416,7 @@ Rules:
 - If you cannot generate a grounded question for a type, omit that question
 - Never invent identifiers not present in the snippet`
 
-const QUESTION_SUB_BATCH = 20
+const QUESTION_SUB_BATCH = 5
 
 interface GeneratedQuestion {
  type: string
@@ -429,12 +429,29 @@ function isGrounded(codeRef: string | undefined, codeContent: string): boolean {
  return codeContent.includes(codeRef)
 }
 
+function tryRepairJson(raw: string): string {
+ const start = raw.indexOf('[')
+ if (start === -1) return raw
+ let depth = 0
+ let lastCompleteObject = -1
+ for (let i = start; i < raw.length; i++) {
+  const ch = raw[i]
+  if (ch === '{') depth++
+  else if (ch === '}') {
+   depth--
+   if (depth === 0) lastCompleteObject = i
+  }
+ }
+ if (lastCompleteObject === -1) return raw
+ return raw.slice(start, lastCompleteObject + 1) + ']'
+}
+
 async function generateQuestionsForSubBatch(
  subChunks: ChunkRow[]
 ): Promise<Map<string, GeneratedQuestion[]>> {
  const result = new Map<string, GeneratedQuestion[]>()
  const chunksContext = subChunks.map(c =>
-  `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})\n${c.content.slice(0, 600)}`
+  `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})\n${c.content.slice(0, 500)}`
  ).join('\n\n---\n\n')
 
  try {
@@ -442,14 +459,14 @@ async function generateQuestionsForSubBatch(
    QUESTION_GEN_SYSTEM,
    `Generate questions for these ${subChunks.length} chunks:\n\n${chunksContext}`,
    0.8,
-   4096,
+   2048,
    `q-gen ${subChunks.length}chunks`
   )
 
   const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[|\s*```)/s) || raw.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) return result
+  const jsonStr = jsonMatch ? jsonMatch[0] : tryRepairJson(raw)
 
-  const parsed = JSON.parse(jsonMatch[0]) as Array<{
+  const parsed = JSON.parse(jsonStr) as Array<{
    chunkId: string
    questions: GeneratedQuestion[]
   }>
