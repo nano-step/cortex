@@ -273,6 +273,13 @@ html, body, #root {
   animation: streamFadeIn 0.25s ease-out forwards;
 }
 
+mark.search-highlight {
+  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 /* Streaming markdown: blinking cursor at end of last block */
 [data-streaming="true"] p:last-of-type::after,
 [data-streaming="true"] li:last-child::after,

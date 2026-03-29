@@ -10,7 +10,59 @@ import { TypingIndicator } from './TypingIndicator'
 import { ThinkingProcess } from './ThinkingProcess'
 import { useChatStore } from '../../stores/chatStore'
 
-// Initialize mermaid once
+function highlightText(text: string, query: string): ReactNode {
+  if (!query) return text
+  const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  const parts = text.split(re)
+  return (
+    <>
+      {parts.map((part, i) =>
+        re.test(part)
+          ? <mark key={i} className="search-highlight">{part}</mark>
+          : part
+      )}
+    </>
+  )
+}
+
+function makeRehypeSearchHighlight(query: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return () => (tree: any) => {
+    if (!query) return
+    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function walk(node: any) {
+      if (node.type === 'text' && re.test(node.value)) {
+        re.lastIndex = 0
+        return { replace: true, value: node.value, re }
+      }
+      if (node.children) node.children = node.children.flatMap(walk)
+      return node
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function walkNode(node: any): any {
+      if (node.type === 'text') {
+        re.lastIndex = 0
+        if (!re.test(node.value)) return [node]
+        re.lastIndex = 0
+        const parts: unknown[] = []
+        let last = 0
+        let m: RegExpExecArray | null
+        while ((m = re.exec(node.value)) !== null) {
+          if (m.index > last) parts.push({ type: 'text', value: node.value.slice(last, m.index) })
+          parts.push({ type: 'element', tagName: 'mark', properties: { className: 'search-highlight' }, children: [{ type: 'text', value: m[0] }] })
+          last = m.index + m[0].length
+        }
+        if (last < node.value.length) parts.push({ type: 'text', value: node.value.slice(last) })
+        return parts
+      }
+      if (node.children) node.children = node.children.flatMap(walkNode)
+      return [node]
+    }
+    if (tree.children) tree.children = tree.children.flatMap(walkNode)
+  }
+}
+
 mermaid.initialize({ startOnLoad: false, theme: 'neutral' })
 
 interface MessageBubbleProps {
@@ -624,7 +676,7 @@ function DocumentMetadataHeader({ headerLine, metaLine }: { headerLine: string; 
   )
 }
 
-function ContentWithImages({ content }: { content: string }) {
+function ContentWithImages({ content, searchQuery }: { content: string; searchQuery?: string }) {
   const imgMatch = content.match(/\[CORTEX_IMG:([^\]]+)\]/)
   if (!imgMatch) {
     const docHeaderMatch = content.match(/^\[Document:\s*.+?\]\n(.+?)\n\n([\s\S]*)$/)
@@ -632,7 +684,7 @@ function ContentWithImages({ content }: { content: string }) {
       return (
         <>
           <DocumentMetadataHeader headerLine={content.split('\n')[0]} metaLine={docHeaderMatch[1]} />
-          <MemoizedMarkdown content={docHeaderMatch[2]} />
+          <MemoizedMarkdown content={docHeaderMatch[2]} searchQuery={searchQuery} />
         </>
       )
     }
@@ -641,11 +693,11 @@ function ContentWithImages({ content }: { content: string }) {
       return (
         <>
           <DocumentMetadataHeader headerLine={content.split('\n')[0]} />
-          <MemoizedMarkdown content={docSimpleMatch[1]} />
+          <MemoizedMarkdown content={docSimpleMatch[1]} searchQuery={searchQuery} />
         </>
       )
     }
-    return <MemoizedMarkdown content={content} />
+    return <MemoizedMarkdown content={content} searchQuery={searchQuery} />
   }
 
   const imgPath = imgMatch[1]
@@ -654,25 +706,27 @@ function ContentWithImages({ content }: { content: string }) {
   return (
     <>
       <CortexImageLoader path={imgPath} alt="Generated Image" />
-      {textWithoutImg && <MemoizedMarkdown content={textWithoutImg} />}
+      {textWithoutImg && <MemoizedMarkdown content={textWithoutImg} searchQuery={searchQuery} />}
     </>
   )
 }
 
-const MemoizedMarkdown = ({ content }: { content: string }) => {
+const MemoizedMarkdown = ({ content, searchQuery }: { content: string; searchQuery?: string }) => {
   const rendered = useMemo(() => {
     const normalized = normalizeMarkdownLists(content)
+    const rehypePlugins: Parameters<typeof ReactMarkdown>[0]['rehypePlugins'] = [rehypeHighlight]
+    if (searchQuery) rehypePlugins.push(makeRehypeSearchHighlight(searchQuery))
     return (
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        rehypePlugins={rehypePlugins}
         urlTransform={cortexUrlTransform}
         components={markdownComponents}
       >
         {normalized}
       </ReactMarkdown>
     )
-  }, [content])
+  }, [content, searchQuery])
   return rendered
 }
 
@@ -753,7 +807,7 @@ export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSe
               )}
               {message.content && (
                 <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] whitespace-pre-wrap break-words">
-                  {message.content}
+                  {searchQuery ? highlightText(message.content, searchQuery) : message.content}
                 </div>
               )}
             </div>
@@ -761,7 +815,7 @@ export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSe
             <StreamingContent conversationId={message.conversationId} />
           ) : (
             <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] prose-cortex break-words stream-fade-in">
-              <ContentWithImages content={message.content} />
+              <ContentWithImages content={message.content} searchQuery={searchQuery} />
             </div>
           )}
 
