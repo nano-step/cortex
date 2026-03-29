@@ -243,12 +243,42 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // AutoScan & AutoTraining Engine
   autoscanGetProgress: () =>
     ipcRenderer.invoke('autoscan:progress'),
+  onAutoscanActivity: (cb: (activity: unknown) => void) => {
+    ipcRenderer.on('autoscan:activity', (_event, activity) => cb(activity))
+    return () => ipcRenderer.removeAllListeners('autoscan:activity')
+  },
   autoscanGetConfig: () =>
     ipcRenderer.invoke('autoscan:config:get'),
   autoscanSetConfig: (config: Record<string, unknown>) =>
     ipcRenderer.invoke('autoscan:config:set', config),
   autoscanTrigger: (projectId: string) =>
     ipcRenderer.invoke('autoscan:trigger', projectId),
+
+  getTrainingTimeline: (projectId: string, granularity?: 'hour' | 'day', sinceMs?: number) =>
+    ipcRenderer.invoke('training:getTimeline', projectId, granularity, sinceMs),
+  getRecentTrainingPairs: (projectId: string, limit?: number) =>
+    ipcRenderer.invoke('training:getRecentPairs', projectId, limit ?? 20),
+  getTrainingRunHistory: () =>
+    ipcRenderer.invoke('training:getRunHistory'),
+  getIntelligenceScore: (projectId: string) =>
+    ipcRenderer.invoke('training:getIntelligenceScore', projectId),
+  getTopTrainingTopics: (projectId: string, sinceMs?: number) =>
+    ipcRenderer.invoke('training:getTopTopics', projectId, sinceMs ?? Date.now() - 30 * 24 * 60 * 60 * 1000),
+  getUpcomingTrainingWork: (projectId: string) =>
+    ipcRenderer.invoke('training:getUpcomingWork', projectId),
+
+  evaluationRunTier1: (projectId: string) =>
+    ipcRenderer.invoke('evaluation:runTier1', projectId),
+  evaluationRunTier2: (projectId: string, sampleSize?: number) =>
+    ipcRenderer.invoke('evaluation:runTier2', projectId, sampleSize),
+  evaluationRunTier3: (projectId: string) =>
+    ipcRenderer.invoke('evaluation:runTier3', projectId),
+  evaluationRunAll: (projectId: string) =>
+    ipcRenderer.invoke('evaluation:runAll', projectId),
+  evaluationGetLatest: (projectId: string) =>
+    ipcRenderer.invoke('evaluation:getLatest', projectId),
+  evaluationGetHistory: (projectId: string, tier: 1 | 2 | 3, limit?: number) =>
+    ipcRenderer.invoke('evaluation:getHistory', projectId, tier, limit),
 
   // GitHub
   getGitHubPAT: () => ipcRenderer.invoke('github:getPAT'),

@@ -1,4 +1,5 @@
 import type { TrainingPipeline, PipelineContext, PipelineResult } from '../types'
+import { runPostScanEvaluation } from '../evaluation-runner'
 import { getDb, projectQueries } from '../../db'
 import {
   runBatch,
@@ -151,6 +152,10 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
     console.log(
       `[AutoScan] Complete — ${totalChunksScanned} chunks, ${totalPairsAccepted}/${totalPairsGenerated} pairs accepted`
     )
+
+    for (const projectId of projectIds) {
+      void runPostScanEvaluation(projectId)
+    }
 
     return { pipeline: 'autoscan', success: true, metrics, durationMs: Date.now() - start }
   } catch (err) {

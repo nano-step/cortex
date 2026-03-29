@@ -499,9 +499,22 @@ declare global {
       triggerLearning: (projectId: string) => Promise<{ trained: number; weights: number }>
       exportTrainingData: (projectId: string) => Promise<{ pairs: number; path: string } | null>
       autoscanGetProgress?: () => Promise<import('../stores/autoscanStore').AutoScanProgress | null>
+      onAutoscanActivity?: (cb: (activity: unknown) => void) => (() => void)
       autoscanGetConfig?: () => Promise<import('../stores/autoscanStore').AutoScanConfig | null>
       autoscanSetConfig?: (config: Partial<import('../stores/autoscanStore').AutoScanConfig>) => Promise<void>
       autoscanTrigger?: (projectId: string) => Promise<void>
+      getTrainingTimeline?: (projectId: string, granularity?: 'hour' | 'day', sinceMs?: number) => Promise<Array<{ day?: string; hour?: string; count: number; autoscan_count: number; positive_count: number }>>
+      getRecentTrainingPairs?: (projectId: string, limit?: number) => Promise<Array<{ id: string; query: string; source: string; label: number; created_at: number; file_path: string | null; language: string | null }>>
+      getTrainingRunHistory?: () => Promise<Array<Record<string, unknown>>>
+      getIntelligenceScore?: (projectId: string) => Promise<{ score: number; breakdown: { pairs: number; weights: number; feedback: number; compression: number }; rawCounts: { pairs: number; weights: number; feedback: number; compressionPercent: number; chunksTotal: number; autoscanRuns: number; autoscanPairsAccepted: number; autoscanChunksScanned: number; autoscanPairsGenerated: number; autoscanAcceptanceRate: number } }>
+      getTopTrainingTopics?: (projectId: string, sinceMs?: number) => Promise<Array<{ file_path: string; language: string; pair_count: number }>>
+      getUpcomingTrainingWork?: (projectId: string) => Promise<Array<{ file_path: string; language: string; chunk_count: number }>>
+      evaluationRunTier1?: (projectId: string) => Promise<import('../stores/evaluationStore').Tier1Metrics | null>
+      evaluationRunTier2?: (projectId: string, sampleSize?: number) => Promise<import('../stores/evaluationStore').Tier2Metrics | null>
+      evaluationRunTier3?: (projectId: string) => Promise<import('../stores/evaluationStore').Tier3Metrics | null>
+      evaluationRunAll?: (projectId: string) => Promise<{ tier1: import('../stores/evaluationStore').Tier1Metrics; tier2: import('../stores/evaluationStore').Tier2Metrics; tier3: import('../stores/evaluationStore').Tier3Metrics } | null>
+      evaluationGetLatest?: (projectId: string) => Promise<{ tier1: import('../stores/evaluationStore').EvalSnapshot | null; tier2: import('../stores/evaluationStore').EvalSnapshot | null; tier3: import('../stores/evaluationStore').EvalSnapshot | null }>
+      evaluationGetHistory?: (projectId: string, tier: 1 | 2 | 3, limit?: number) => Promise<import('../stores/evaluationStore').EvalSnapshot[]>
 
       // Agent Mode
       agentExecute?: (projectId: string, query: string, strategy?: string) => Promise<{ content: string }>

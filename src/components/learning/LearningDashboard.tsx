@@ -7,6 +7,7 @@ import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
 import { useLearningStore } from '../../stores/learningStore'
 import { useProjectStore } from '../../stores/projectStore'
+import { EvaluationDashboard } from '../evaluation/EvaluationDashboard'
 
 interface LearningDashboardProps {
   open: boolean
@@ -262,8 +263,13 @@ export function LearningDashboard({ open, onClose, projectId }: LearningDashboar
                     </div>
                   </div>
                 )}
-              </div>
+               </div>
             </>
+          )}
+          {projectId && (
+            <div className="mt-6 border-t border-gray-700/50 pt-6">
+              <EvaluationDashboard projectId={projectId} />
+            </div>
           )}
         </div>
       </div>

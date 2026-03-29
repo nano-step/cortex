@@ -8,6 +8,7 @@ import { registerSkillsIPC } from './skills.ipc'
 import { registerBrainIPC } from './brain.ipc'
 import { registerProjectIPC } from './project.ipc'
 import { registerSettingsIPC } from './settings.ipc'
+import { registerEvaluationIPC } from './evaluation.ipc'
 
 export function registerAllIPC(
   ipcMain: IpcMain,
@@ -23,4 +24,5 @@ export function registerAllIPC(
   registerBrainIPC(ipcMain, app, getMainWindow)
   registerProjectIPC(ipcMain, app, getMainWindow)
   registerSettingsIPC(ipcMain, getMainWindow)
+  registerEvaluationIPC(ipcMain)
 }
