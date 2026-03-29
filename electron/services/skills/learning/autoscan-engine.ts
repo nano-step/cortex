@@ -41,6 +41,15 @@ export interface AutoScanConfig {
  maxRetries: number
 }
 
+export interface AutoScanActivity {
+ filePath: string
+ question: string
+ answer: string
+ score: number
+ status: 'generating' | 'answering' | 'judging' | 'accepted' | 'rejected'
+ timestamp: number
+}
+
 export interface AutoScanProgress {
  phase: 'chunks' | 'crystals' | 'idle'
  currentBatch: number
@@ -52,6 +61,8 @@ export interface AutoScanProgress {
  lastRunAt: number | null
  isRunning: boolean
  currentProjectId: string | null
+ currentActivity: AutoScanActivity | null
+ recentActivities: AutoScanActivity[]
  circuitStatus?: {
   state: 'closed' | 'open' | 'half-open'
   dailyCostUsd: number
@@ -98,7 +109,9 @@ let progress: AutoScanProgress = {
  pairsRejected: 0,
  lastRunAt: null,
  isRunning: false,
- currentProjectId: null
+ currentProjectId: null,
+ currentActivity: null,
+ recentActivities: []
 }
 
 export function getAutoScanConfig(): AutoScanConfig {
@@ -124,6 +137,26 @@ export function getAutoScanProgress(): AutoScanProgress {
 
 export function setAutoScanProgress(partial: Partial<AutoScanProgress>): void {
  progress = { ...progress, ...partial }
+}
+
+const MAX_RECENT_ACTIVITIES = 20
+
+type ActivityListener = (activity: AutoScanActivity | null) => void
+let activityListener: ActivityListener | null = null
+
+export function onActivityUpdate(listener: ActivityListener): void {
+ activityListener = listener
+}
+
+function setActivity(activity: AutoScanActivity): void {
+ const updated = [activity, ...progress.recentActivities].slice(0, MAX_RECENT_ACTIVITIES)
+ progress = { ...progress, currentActivity: activity, recentActivities: updated }
+ activityListener?.(activity)
+}
+
+export function clearActivity(): void {
+ progress = { ...progress, currentActivity: null }
+ activityListener?.(null)
 }
 
 // =====================
@@ -254,9 +287,9 @@ async function callLLM(
  maxTokens: number = 2048,
  label?: string
 ): Promise<string> {
- // New circuit breaker (timed + budget-aware)
  if (isCircuitOpen()) {
   logTrain(`[Circuit OPEN] Skipping LLM call | ${label ?? '?'} | cost=$${circuitBreaker.dailyCostUsd.toFixed(3)}`)
+  consecutiveErrors = MAX_CONSECUTIVE_ERRORS
   return ''
  }
 
@@ -556,6 +589,11 @@ export async function runBatch(
  return { chunksScanned: 0, pairsGenerated: 0, pairsAccepted: 0, pairsRejected: 0, durationMs: Date.now() - start }
  }
 
+ if (isCircuitOpen()) {
+  logScan(`[Code] Circuit breaker OPEN — bỏ qua batch offset=${offset}`)
+  return { chunksScanned: 0, pairsGenerated: 0, pairsAccepted: 0, pairsRejected: 0, durationMs: Date.now() - start }
+ }
+
  logScan(`[Code] Batch offset=${offset} | ${chunks.length} chunks | bắt đầu sinh câu hỏi...`)
 
  const t1 = Date.now()
@@ -578,23 +616,28 @@ export async function runBatch(
 
   if (config.enableEvolInstruct && Math.random() < 0.3) {
   logTrain(`[Evol-Instruct] Chủ đề: ${topic} | Câu gốc: "${truncate(question, 60)}"`)
+  setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'generating', timestamp: Date.now() })
   question = await evolveQuestion(question)
   await sleep(config.requestDelayMs)
   }
 
   logTrain(`[Code/${qItem.type}] ${topic} | Q: "${truncate(question, 80)}"`)
+  setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'answering', timestamp: Date.now() })
   const answer = await answerQuestion(question, chunk.content, chunk.file_path)
   await sleep(config.requestDelayMs)
   if (!answer) { pairsRejected++; continue }
 
+  setActivity({ filePath: chunk.file_path, question, answer, score: 0, status: 'judging', timestamp: Date.now() })
   const judgment = await judgeQAPair(question, answer, chunk.content)
   await sleep(config.requestDelayMs)
 
   if (judgment.accepted) {
+  setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'accepted', timestamp: Date.now() })
   await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
   pairsAccepted++
   logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
   } else {
+  setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
   logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
   pairsRejected++
   }
@@ -643,6 +686,7 @@ export async function runCrystalBatch(projectId: string): Promise<AutoScanBatchR
  const questionPrompt = `Given this knowledge crystal (type: ${crystal.crystalType}, domain: ${crystal.domain || 'general'}):\n${crystal.content.slice(0, 600)}\n\nGenerate one insightful question a developer would ask about this. Return only the question.`
 
  logTrain(`[Crystal] Chủ đề: ${topic} | prompt="${truncate(questionPrompt, 80)}"`)
+ setActivity({ filePath: `crystal:${topic}`, question: questionPrompt, answer: '', score: 0, status: 'generating', timestamp: Date.now() })
  const question = await callLLM(
  'You generate precise developer questions from knowledge insights.',
  questionPrompt,
@@ -653,18 +697,22 @@ export async function runCrystalBatch(projectId: string): Promise<AutoScanBatchR
  if (!question.trim()) continue
  pairsGenerated++
 
+ setActivity({ filePath: `crystal:${topic}`, question, answer: '', score: 0, status: 'answering', timestamp: Date.now() })
  const answer = await answerQuestion(question, crystal.content, crystal.domain || 'general')
  await sleep(config.requestDelayMs)
  if (!answer) { pairsRejected++; continue }
 
+ setActivity({ filePath: `crystal:${topic}`, question, answer, score: 0, status: 'judging', timestamp: Date.now() })
  const judgment = await judgeQAPair(question, answer, crystal.content)
  await sleep(config.requestDelayMs)
 
  if (judgment.accepted) {
+ setActivity({ filePath: `crystal:${topic}`, question, answer, score: judgment.score, status: 'accepted', timestamp: Date.now() })
  await saveAcceptedPair(projectId, question, answer, 'crystal', crystal.id, judgment.score)
  pairsAccepted++
  logLearn(`[Crystal] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
  } else {
+ setActivity({ filePath: `crystal:${topic}`, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
  logLearn(`[Crystal] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
  pairsRejected++
  }

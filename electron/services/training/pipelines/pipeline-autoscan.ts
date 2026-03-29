@@ -3,11 +3,13 @@ import { getDb, projectQueries } from '../../db'
 import {
   runBatch,
   runCrystalBatch,
+  clearActivity,
   runJiraBatch,
   runConfluenceBatch,
   getAutoScanConfig,
   setAutoScanProgress,
-  getTotalChunkCount
+  getTotalChunkCount,
+  getCircuitStatus
 } from '../../skills/learning/autoscan-engine'
 
 function getAutoScanEnabledProjectIds(): string[] {
@@ -58,6 +60,11 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
       let batchIndex = 0
 
       while (offset < totalChunks) {
+        if (getCircuitStatus().state === 'open') {
+          console.log(`[AutoScan] Circuit breaker OPEN — dừng toàn bộ scan job (project=${projectId})`)
+          break
+        }
+
         setAutoScanProgress({ currentBatch: batchIndex + 1 })
 
         const batchResult = await runBatch(projectId, offset, scanConfig.batchSize)
@@ -79,25 +86,30 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
         batchIndex++
       }
 
-      setAutoScanProgress({ phase: 'crystals' })
-      const crystalResult = await runCrystalBatch(projectId)
-      totalPairsGenerated += crystalResult.pairsGenerated
-      totalPairsAccepted += crystalResult.pairsAccepted
-      totalPairsRejected += crystalResult.pairsRejected
+      if (getCircuitStatus().state === 'open') {
+        console.log(`[AutoScan] Circuit breaker OPEN — bỏ qua crystal/jira/confluence batches`)
+      } else {
+        setAutoScanProgress({ phase: 'crystals' })
+        const crystalResult = await runCrystalBatch(projectId)
+        totalPairsGenerated += crystalResult.pairsGenerated
+        totalPairsAccepted += crystalResult.pairsAccepted
+        totalPairsRejected += crystalResult.pairsRejected
 
-      const jiraResult = await runJiraBatch(projectId)
-      totalChunksScanned += jiraResult.chunksScanned
-      totalPairsGenerated += jiraResult.pairsGenerated
-      totalPairsAccepted += jiraResult.pairsAccepted
-      totalPairsRejected += jiraResult.pairsRejected
+        const jiraResult = await runJiraBatch(projectId)
+        totalChunksScanned += jiraResult.chunksScanned
+        totalPairsGenerated += jiraResult.pairsGenerated
+        totalPairsAccepted += jiraResult.pairsAccepted
+        totalPairsRejected += jiraResult.pairsRejected
 
-      const confResult = await runConfluenceBatch(projectId)
-      totalChunksScanned += confResult.chunksScanned
-      totalPairsGenerated += confResult.pairsGenerated
-      totalPairsAccepted += confResult.pairsAccepted
-      totalPairsRejected += confResult.pairsRejected
+        const confResult = await runConfluenceBatch(projectId)
+        totalChunksScanned += confResult.chunksScanned
+        totalPairsGenerated += confResult.pairsGenerated
+        totalPairsAccepted += confResult.pairsAccepted
+        totalPairsRejected += confResult.pairsRejected
+      }
     }
 
+    clearActivity()
     setAutoScanProgress({
       phase: 'idle',
       isRunning: false,
