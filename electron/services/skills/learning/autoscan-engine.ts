@@ -91,12 +91,12 @@ interface ChunkRow {
 
 const DEFAULT_CONFIG: AutoScanConfig = {
  batchSize: 20,
- judgeThreshold: 4.0,
+ judgeThreshold: 3.5,
  maxQuestionsPerChunk: 3,
  enableEvolInstruct: true,
  evolInDepthRatio: 0.5,
  evolInBreadthRatio: 0.2,
- nearMissThreshold: 3.0,
+ nearMissThreshold: 2.5,
  pauseDuringChat: true,
  enabled: false,
  requestDelayMs: 500,
