@@ -129,6 +129,20 @@ export function setAutoScanConfig(partial: Partial<AutoScanConfig>): void {
  console.log('[AutoScan] Config updated:', config)
 }
 
+export function syncEnabledFromDb(): void {
+ try {
+  const db = getDb()
+  const row = db.prepare('SELECT COUNT(*) as count FROM projects WHERE auto_scan_enabled = 1').get() as { count: number }
+  const anyEnabled = row.count > 0
+  if (config.enabled !== anyEnabled) {
+   config = { ...config, enabled: anyEnabled }
+   console.log(`[AutoScan] Synced enabled=${anyEnabled} from DB (${row.count} project(s) enabled)`)
+  }
+ } catch (err) {
+  console.error('[AutoScan] Failed to sync enabled from DB:', err)
+ }
+}
+
 export function getAutoScanProgress(): AutoScanProgress {
  const cs = getCircuitStatus()
  return {

@@ -5,13 +5,15 @@ import { trainFromPairs, getLearnedWeightCount } from '../services/learned-reran
 import { initDefaultVariant } from '../services/query-optimizer'
 import { getCompressionStats } from '../services/skills/efficiency/cost-tracker'
 import { optimizePrompt } from '../services/skills/learning/prompt-optimizer'
-import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig, onActivityUpdate } from '../services/skills/learning/autoscan-engine'
+import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig, onActivityUpdate, syncEnabledFromDb } from '../services/skills/learning/autoscan-engine'
 import { triggerManualTraining } from '../services/training/training-engine'
 import { getRunHistory } from '../services/training/training-db'
 import { checkForUpdates } from '../services/updater-service'
 import { getAuditLog } from '../services/audit-service'
 
 export function registerLearningIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
+  syncEnabledFromDb()
+
   onActivityUpdate((activity) => {
     getMainWindow()?.webContents.send('autoscan:activity', activity)
   })

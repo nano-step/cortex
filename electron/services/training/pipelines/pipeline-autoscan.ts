@@ -32,10 +32,6 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
   const start = Date.now()
   const scanConfig = getAutoScanConfig()
 
-  if (!scanConfig.enabled) {
-    return { pipeline: 'autoscan', success: true, metrics: { skipped: 1 }, durationMs: 0 }
-  }
-
   let totalChunksScanned = 0
   let totalPairsGenerated = 0
   let totalPairsAccepted = 0
@@ -45,6 +41,10 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
     const projectIds = context.projectId
       ? (isProjectAutoScanEnabled(context.projectId) ? [context.projectId] : [])
       : getAutoScanEnabledProjectIds()
+
+    if (projectIds.length === 0) {
+      return { pipeline: 'autoscan', success: true, metrics: { skipped: 1 }, durationMs: 0 }
+    }
 
     for (const projectId of projectIds) {
       const totalChunks = getTotalChunkCount(projectId)

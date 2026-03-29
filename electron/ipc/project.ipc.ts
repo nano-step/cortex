@@ -8,6 +8,7 @@ import { stopFileWatcher } from '../services/sync-engine'
 import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, getCurrentBranch, listOrgRepos } from '../services/git-service'
 import type { OrgRepo } from '../services/git-service'
 import { initNanoBrain } from '../services/nano-brain-service'
+import { syncEnabledFromDb } from '../services/skills/learning/autoscan-engine'
 
 export function registerProjectIPC(ipcMain: IpcMain, app: App, getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('project:create', (_event, name: string, brainName: string) => {
@@ -20,7 +21,9 @@ export function registerProjectIPC(ipcMain: IpcMain, app: App, getMainWindow: ()
   ipcMain.handle('project:delete', (_event, projectId: string) => { projectQueries.delete(getDb()).run(projectId); return true })
   ipcMain.handle('project:rename', (_event, projectId: string, newName: string) => { projectQueries.updateName(getDb()).run(newName, projectId); return true })
   ipcMain.handle('project:setAutoScanEnabled', (_event, projectId: string, enabled: boolean) => {
-    projectQueries.updateAutoScanEnabled(getDb()).run(enabled ? 1 : 0, projectId); return true
+    projectQueries.updateAutoScanEnabled(getDb()).run(enabled ? 1 : 0, projectId)
+    syncEnabledFromDb()
+    return true
   })
   ipcMain.handle('project:getAutoScanEnabled', (_event, projectId: string) => {
     const row = projectQueries.getById(getDb()).get(projectId) as { auto_scan_enabled: number } | undefined
