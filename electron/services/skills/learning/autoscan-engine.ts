@@ -1014,9 +1014,16 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
 
  try {
  const db = getDb()
+ const jiraOffset = getScanOffset(`jira:${projectId}`)
+ const totalJira = (db.prepare(`SELECT COUNT(*) as c FROM chunks WHERE project_id = ? AND language = 'jira'`).get(projectId) as { c: number }).c
+ const jiraBatchSize = 20
  const jiraChunks = db.prepare(
- `SELECT id, content, file_path, name FROM chunks WHERE project_id = ? AND language = 'jira' ORDER BY created_at DESC LIMIT 200`
- ).all(projectId) as Array<{ id: string; content: string; file_path: string; name: string }>
+ `SELECT id, content, file_path, name FROM chunks WHERE project_id = ? AND language = 'jira' ORDER BY created_at ASC LIMIT ? OFFSET ?`
+ ).all(projectId, jiraBatchSize, jiraOffset) as Array<{ id: string; content: string; file_path: string; name: string }>
+ if (jiraChunks.length > 0) {
+  advanceScanOffset(`jira:${projectId}`, jiraBatchSize)
+  if (jiraOffset + jiraBatchSize >= totalJira) resetScanOffset(`jira:${projectId}`)
+ }
 
  if (jiraChunks.length === 0) {
  return { chunksScanned: 0, pairsGenerated: 0, pairsAccepted: 0, pairsRejected: 0, durationMs: 0 }
@@ -1040,14 +1047,15 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
  const raw = await callLLM(
   JIRA_QUESTION_SYSTEM,
   `Generate questions for these ${sub.length} Jira issues:\n\n${subContext}`,
-  0.8, 8192,
+  0.8, 2048,
   `jira-q batch=${i} issues=${issueKeys.slice(0, 40)}`
  )
  await sleep(config.requestDelayMs)
  const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[)/s) || raw.match(/\[[\s\S]*\]/)
- if (!jsonMatch) { logScan(`[Jira] Batch ${i}: không parse được JSON`); continue }
+ const jsonStr = jsonMatch ? jsonMatch[0] : tryRepairJson(raw)
+ if (!jsonStr || jsonStr === raw) { logScan(`[Jira] Batch ${i}: không parse được JSON`); continue }
 
- const parsed = JSON.parse(jsonMatch[0]) as Array<{
+ const parsed = JSON.parse(jsonStr) as Array<{
   chunkId: string
   questions: Array<{ type: string; question: string }>
  }>
@@ -1121,9 +1129,16 @@ export async function runConfluenceBatch(projectId: string): Promise<AutoScanBat
 
  try {
  const db = getDb()
+ const confOffset = getScanOffset(`conf:${projectId}`)
+ const totalConf = (db.prepare(`SELECT COUNT(*) as c FROM chunks WHERE project_id = ? AND language = 'confluence'`).get(projectId) as { c: number }).c
+ const confBatchSize = 20
  const confChunks = db.prepare(
- `SELECT id, content, file_path, name FROM chunks WHERE project_id = ? AND language = 'confluence' ORDER BY created_at DESC LIMIT 100`
- ).all(projectId) as Array<{ id: string; content: string; file_path: string; name: string }>
+ `SELECT id, content, file_path, name FROM chunks WHERE project_id = ? AND language = 'confluence' ORDER BY created_at ASC LIMIT ? OFFSET ?`
+ ).all(projectId, confBatchSize, confOffset) as Array<{ id: string; content: string; file_path: string; name: string }>
+ if (confChunks.length > 0) {
+  advanceScanOffset(`conf:${projectId}`, confBatchSize)
+  if (confOffset + confBatchSize >= totalConf) resetScanOffset(`conf:${projectId}`)
+ }
 
  if (confChunks.length === 0) {
  return { chunksScanned: 0, pairsGenerated: 0, pairsAccepted: 0, pairsRejected: 0, durationMs: 0 }
@@ -1147,17 +1162,18 @@ export async function runConfluenceBatch(projectId: string): Promise<AutoScanBat
  const raw = await callLLM(
   CONFLUENCE_QUESTION_SYSTEM,
   `Generate questions for these ${sub.length} Confluence pages:\n\n${subContext}`,
-  0.8, 8192,
+  0.8, 2048,
   `conf-q batch=${i} pages=${pageNames.slice(0, 40)}`
  )
  await sleep(config.requestDelayMs)
  const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[)/s) || raw.match(/\[[\s\S]*\]/)
- if (!jsonMatch) { logScan(`[Confluence] Batch ${i}: không parse được JSON`); continue }
+  const jsonStr = jsonMatch ? jsonMatch[0] : tryRepairJson(raw)
+  if (!jsonStr || jsonStr === raw) { logScan(`[Confluence] Batch ${i}: không parse được JSON`); continue }
 
- const parsed = JSON.parse(jsonMatch[0]) as Array<{
-  chunkId: string
-  questions: Array<{ type: string; question: string }>
- }>
+  const parsed = JSON.parse(jsonStr) as Array<{
+   chunkId: string
+   questions: Array<{ type: string; question: string }>
+  }>
 
  for (const item of parsed) {
   if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break
