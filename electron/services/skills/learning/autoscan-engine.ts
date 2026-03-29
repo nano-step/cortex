@@ -986,22 +986,56 @@ export function getAllProjectIds(): string[] {
  }
 }
 
-const JIRA_QUESTION_SYSTEM = `You are a project analyst. Given Jira issue data, generate insightful questions that a project manager or developer would ask to understand the project deeply.
+function getRelatedCodeSnippets(projectId: string, keywords: string[], limit = 3): string {
+ if (keywords.length === 0) return ''
+ try {
+  const db = getDb()
+  const snippets: string[] = []
+  for (const kw of keywords.slice(0, 5)) {
+   if (kw.length < 4) continue
+   const rows = db.prepare(
+    `SELECT file_path, content FROM chunks
+     WHERE project_id = ? AND language NOT IN ('confluence','jira')
+     AND content LIKE ? LIMIT 2`
+   ).all(projectId, `%${kw}%`) as Array<{ file_path: string; content: string }>
+   for (const r of rows) {
+    const snippet = `[${r.file_path}]\n${r.content.slice(0, 300)}`
+    if (!snippets.includes(snippet)) snippets.push(snippet)
+    if (snippets.length >= limit) break
+   }
+   if (snippets.length >= limit) break
+  }
+  return snippets.length > 0 ? `\n\nRelated code:\n${snippets.join('\n---\n')}` : ''
+ } catch {
+  return ''
+ }
+}
+
+function extractKeywords(text: string): string[] {
+ return text
+  .replace(/[^\w\s]/g, ' ')
+  .split(/\s+/)
+  .filter(w => w.length >= 4 && !/^(this|that|with|from|have|been|will|when|what|where|which|their|there|about|into|than|then|also|some|more|over|such|only|most|very|just|each|like|after|before|other|first|last|next|same|both|many|much|well|even|back|here|case|make|take|need|know|good|time|work|used|using|being|these|those|they|them|were|would|could|should|shall|might|must|upon|within|without|between|through|during)$/.test(w.toLowerCase()))
+  .slice(0, 10)
+}
+
+const JIRA_QUESTION_SYSTEM = `You are a project analyst. Given Jira issue data and related code context, generate insightful questions that connect project management with the actual implementation.
 
 Focus on:
-- Sprint progress and velocity
-- Bug patterns and recurring issues
-- Team member workload and assignments
-- Unresolved blockers and long-standing issues
-- Issue relationships and dependencies
+- How this issue relates to specific code files or functions (if code context provided)
+- Root cause of bugs at the code level
+- What code changes would resolve blockers
+- Sprint progress tied to concrete implementation work
+- Issue dependencies reflected in code architecture
 
 Return a JSON array (max 3 questions per issue):
-[{"chunkId":"...","questions":[{"type":"bug_analysis","question":"..."},{"type":"sprint_insight","question":"..."},{"type":"team_insight","question":"..."}]}]
+[{"chunkId":"...","questions":[{"type":"implementation","question":"..."},{"type":"bug_analysis","question":"..."},{"type":"process","question":"..."}]}]
 
-Rules: Questions must be specific to actual data. Reference real issue keys, assignees, sprints.`
+Rules: Questions must be specific to the actual issue data. Reference real issue keys. If code context is provided, connect questions to it.`
 
-const JIRA_ANSWER_SYSTEM = `You are an expert project analyst with deep knowledge of this Jira project. Answer questions about issues, sprints, team members, and project health based on the provided data.
-- Reference specific issue keys (e.g., PS-123), sprint names, team member names
+const JIRA_ANSWER_SYSTEM = `You are an expert who understands both project management and code implementation for this project. Answer questions about Jira issues using both the issue data and any related code provided.
+- Reference specific issue keys (e.g., PS-123), file paths, and function names when relevant
+- Connect issue descriptions to concrete code evidence when available
 - Be concise and actionable (3-5 sentences)
 - If data is insufficient, state what's missing`
 
@@ -1066,12 +1100,14 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
   const chunk = sub.find(c => c.id === item.chunkId)
   if (!chunk || !Array.isArray(item.questions)) continue
 
+  const jiraKeywords = extractKeywords(chunk.content + ' ' + chunk.name)
+  const relatedCode = getRelatedCodeSnippets(projectId, jiraKeywords)
   for (const qItem of item.questions) {
   pairsGenerated++
   logTrain(`[Jira/${qItem.type}] ${chunk.name} | Q: "${truncate(qItem.question, 80)}"`)
   const answer = await callLLM(
    JIRA_ANSWER_SYSTEM,
-   `Jira data:\n${chunk.content.slice(0, 1200)}\n\nQuestion: ${qItem.question}`,
+   `Jira issue:\n${chunk.content.slice(0, 800)}${relatedCode}\n\nQuestion: ${qItem.question}`,
    0.2, 1024,
    `jira-ans | ${chunk.name} | ${truncate(qItem.question, 40)}`
   )
@@ -1101,24 +1137,25 @@ export async function runJiraBatch(projectId: string): Promise<AutoScanBatchResu
  return { chunksScanned, pairsGenerated, pairsAccepted, pairsRejected, durationMs: Date.now() - start }
 }
 
-const CONFLUENCE_QUESTION_SYSTEM = `You are a technical documentation analyst. Given Confluence page content, generate insightful questions about the technical information, architecture decisions, and potential conflicts or gaps.
+const CONFLUENCE_QUESTION_SYSTEM = `You are a technical documentation analyst. Given Confluence page content and related code context, generate insightful questions that bridge documentation with implementation.
 
 Focus on:
-- Technical architecture and design decisions
-- Potential conflicts or contradictions with other docs
-- Incomplete or ambiguous specifications
-- Dependencies and integration points
-- Historical context and rationale
+- Whether the documented architecture matches the actual code (if code context provided)
+- Gaps between what is documented and what exists in code
+- Technical decisions documented that have implementation consequences
+- Dependencies and integration points reflected in code
+- Historical context explaining why code is structured a certain way
 
 Return a JSON array (max 3 questions per page):
-[{"chunkId":"...","questions":[{"type":"technical","question":"..."},{"type":"conflict_check","question":"..."},{"type":"architecture","question":"..."}]}]
+[{"chunkId":"...","questions":[{"type":"implementation_match","question":"..."},{"type":"architecture","question":"..."},{"type":"gap_analysis","question":"..."}]}]
 
-Rules: Questions must be specific to actual page content. Reference real section names, technologies, components.`
+Rules: Questions must be specific to actual page content. Reference real section names, technologies, components. If code context is provided, connect questions to it.`
 
-const CONFLUENCE_ANSWER_SYSTEM = `You are a technical documentation expert with deep knowledge of this project's Confluence documentation. Answer questions about architecture, technical decisions, and documentation gaps.
-- Reference specific page titles, section names, and documented decisions
-- Flag potential conflicts or gaps if identified
-- Be precise and actionable (3-5 sentences)`
+const CONFLUENCE_ANSWER_SYSTEM = `You are a technical expert who understands both the documented architecture and the actual code implementation for this project. Answer questions using both the Confluence documentation and any related code provided.
+- Reference specific page titles, section names, file paths, and function names
+- Highlight discrepancies between docs and code if found
+- Be precise and actionable (3-5 sentences)
+- Flag gaps or conflicts if identified`
 
 export async function runConfluenceBatch(projectId: string): Promise<AutoScanBatchResult> {
  const start = Date.now()
@@ -1175,21 +1212,23 @@ export async function runConfluenceBatch(projectId: string): Promise<AutoScanBat
    questions: Array<{ type: string; question: string }>
   }>
 
- for (const item of parsed) {
-  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break
+  for (const item of parsed) {
+   if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) break
 
-  const chunk = sub.find(c => c.id === item.chunkId)
-  if (!chunk || !Array.isArray(item.questions)) continue
+   const chunk = sub.find(c => c.id === item.chunkId)
+   if (!chunk || !Array.isArray(item.questions)) continue
 
-  for (const qItem of item.questions) {
-  pairsGenerated++
-  logTrain(`[Confluence/${qItem.type}] "${truncate(chunk.name, 30)}" | Q: "${truncate(qItem.question, 80)}"`)
-  const answer = await callLLM(
-   CONFLUENCE_ANSWER_SYSTEM,
-   `Confluence page:\n${chunk.content.slice(0, 1500)}\n\nQuestion: ${qItem.question}`,
-   0.2, 1024,
-   `conf-ans | ${truncate(chunk.name, 30)} | ${truncate(qItem.question, 40)}`
-  )
+   const confKeywords = extractKeywords(chunk.content + ' ' + chunk.name)
+   const relatedCode = getRelatedCodeSnippets(projectId, confKeywords)
+   for (const qItem of item.questions) {
+   pairsGenerated++
+   logTrain(`[Confluence/${qItem.type}] "${truncate(chunk.name, 30)}" | Q: "${truncate(qItem.question, 80)}"`)
+   const answer = await callLLM(
+    CONFLUENCE_ANSWER_SYSTEM,
+    `Confluence page:\n${chunk.content.slice(0, 1000)}${relatedCode}\n\nQuestion: ${qItem.question}`,
+    0.2, 1024,
+    `conf-ans | ${truncate(chunk.name, 30)} | ${truncate(qItem.question, 40)}`
+   )
   await sleep(config.requestDelayMs)
   if (!answer) { pairsRejected++; continue }
 
