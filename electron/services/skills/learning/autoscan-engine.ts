@@ -86,6 +86,12 @@ interface ChunkRow {
  content: string
  file_path: string
  language: string
+ chunk_type: string
+ name: string | null
+ dependencies: string
+ exports: string
+ line_start: number
+ line_end: number
 }
 
 
@@ -419,36 +425,37 @@ export function resetCircuitBreaker(): void {
  consecutiveErrors = 0
 }
 
-const QUESTION_GEN_SYSTEM = `You are a senior engineer creating training data for a code intelligence system.
+const QUESTION_GEN_SYSTEM = `You are a senior engineer creating deep training data for a code intelligence system.
 
-Given real code snippets from a production codebase, generate questions a developer would ACTUALLY search for when working with this code. Questions must reference specific implementation details — not generic descriptions.
+Given code chunks with metadata (type, name, dependencies, exports, line range), generate questions across 6 Socratic layers that build 100% understanding of the chunk.
 
-GOOD questions (grounded in specific identifiers):
-- "Why does \`CircuitBreakerState\` use a Map instead of a class instance?"
-- "What happens if \`dailyResetAt\` is in the past when \`checkDailyReset()\` runs?"
-- "How does \`consecutiveErrors\` interact with the circuit breaker state machine?"
+QUESTION LAYERS:
+1. MECHANISM (how): "How does \`refreshToken()\` handle token expiry — what sequence of calls occurs?"
+2. DESIGN (why): "Why does \`CircuitBreaker\` use exponential backoff instead of fixed intervals?"
+3. CONTRACT (invariants): "What preconditions must hold before calling \`validateUser()\`, and what does it guarantee on return?"
+4. SIDE_EFFECTS: "What state changes outside this function when \`saveAcceptedPair()\` is called?"
+5. EDGE_CASES: "What happens in \`parseConfig()\` when the input JSON is malformed or a required key is missing?"
+6. IMPACT (what-if): "If \`QUESTION_SUB_BATCH\` is doubled, what downstream effects occur on rate limiting and JSON truncation?"
 
-BAD questions (generic):
-- "What is the purpose of this file?"
-- "How does error handling work?"
+BAD questions (never generate):
+- "What is the purpose of this file?" (too generic)
+- "How does error handling work?" (not grounded)
+- Questions about identifiers not present in the snippet
 
-For each chunk, generate exactly 3 questions:
-1. IMPLEMENTATION: About a specific line, function, or variable in the code
-2. DESIGN: About WHY the code is structured this way (tradeoffs, patterns)
-3. INTERACTION: About how this code connects to other parts of the system
+For each chunk generate 4 questions, choosing the 4 most revealing layers given the chunk's content and type.
 
 Return JSON:
 [{"chunkId": "...", "questions": [
-  {"type": "implementation", "question": "...", "codeRef": "<exact_identifier_from_code>"},
-  {"type": "design", "question": "...", "codeRef": "<exact_identifier_from_code>"},
-  {"type": "interaction", "question": "...", "codeRef": "<exact_identifier_from_code>"}
+  {"type": "mechanism"|"design"|"contract"|"side_effects"|"edge_cases"|"impact", "question": "...", "codeRef": "<exact_identifier>"},
+  ...
 ]}]
 
 Rules:
-- Each question MUST reference a specific identifier (function, variable, class) from the actual code
-- Put that exact identifier in codeRef
-- If you cannot generate a grounded question for a type, omit that question
-- Never invent identifiers not present in the snippet`
+- codeRef MUST be an exact identifier present in the chunk (function name, variable, class, constant)
+- Choose question types that fit the chunk: classes benefit from contract+side_effects, utilities from edge_cases+impact, configs from design+impact
+- Use dependencies/exports metadata to ask about relationships when available
+- If chunk has exports, include at least one question about how callers would use those exports
+- Never invent identifiers`
 
 const QUESTION_SUB_BATCH = 5
 
@@ -484,9 +491,17 @@ async function generateQuestionsForSubBatch(
  subChunks: ChunkRow[]
 ): Promise<Map<string, GeneratedQuestion[]>> {
  const result = new Map<string, GeneratedQuestion[]>()
- const chunksContext = subChunks.map(c =>
-  `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})\n${c.content.slice(0, 500)}`
- ).join('\n\n---\n\n')
+ const chunksContext = subChunks.map(c => {
+  const deps = (() => { try { const d = JSON.parse(c.dependencies || '[]'); return d.length ? `Imports: ${(d as string[]).slice(0, 5).join(', ')}` : '' } catch { return '' } })()
+  const exps = (() => { try { const e = JSON.parse(c.exports || '[]'); return e.length ? `Exports: ${(e as string[]).slice(0, 5).join(', ')}` : '' } catch { return '' } })()
+  const meta = [
+   c.chunk_type && c.chunk_type !== 'other' ? `Type: ${c.chunk_type}` : '',
+   c.name ? `Name: ${c.name}` : '',
+   c.line_start ? `Lines: ${c.line_start}-${c.line_end}` : '',
+   deps, exps
+  ].filter(Boolean).join(' | ')
+  return `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})${meta ? `\n${meta}` : ''}\n${c.content.slice(0, 800)}`
+ }).join('\n\n---\n\n')
 
  try {
   const raw = await callLLM(
@@ -604,29 +619,38 @@ export async function judgeQAPair(
  }
 }
 
-const EVOL_INDEPTH_SYSTEM = `You are an expert at making code questions more challenging.
+const EVOL_INDEPTH_SYSTEM = `You are an expert at making code questions deeper and more revealing.
 
 Given a code question, rewrite it using ONE of these strategies:
-1. ADD CONSTRAINT: Add a requirement that limits the solution ("...without using X", "...with O(1) memory")
-2. DEEPEN REASONING: Require explanation of WHY, not just WHAT ("...and explain the tradeoffs between approaches")
-3. CONCRETIZE: Replace vague terms with specific scenarios ("...when handling 1000 concurrent requests")
-4. EDGE CASES: Add a failure scenario ("...and what happens when the input is null or the service is unavailable")
+1. SIDE EFFECTS: Extend to ask about ALL state changes ("...and what external state, files, or services are affected?")
+2. FAILURE PATH: Add failure scenario ("...and trace exactly what happens if X fails at step N")
+3. INVARIANT PROBE: Add precondition/postcondition layer ("...what must be true before this runs, and what is guaranteed after?")
+4. MULTI-HOP: Connect to a dependency ("...and how does the result flow into the calling function?")
+5. PERFORMANCE: Add complexity dimension ("...what is the time/memory complexity and what causes it?")
+6. CONCRETIZE: Replace vague terms with specific production scenario ("...when handling 10,000 concurrent users with a 200ms timeout")
 
 Rules:
 - Question MUST still be answerable from the provided code context
 - Keep under 150 words
-- If you cannot make it meaningfully harder, return exactly: ELIMINATE
+- If you cannot make it meaningfully deeper, return exactly: ELIMINATE
 - Return ONLY the rewritten question, nothing else`
 
-const EVOL_INBREADTH_SYSTEM = `You are an expert at generating diverse code questions.
+const EVOL_INBREADTH_SYSTEM = `You are an expert at generating diverse, complementary code questions.
 
-Given a code question, generate a NEW question that:
-- Covers a DIFFERENT aspect of the same code (not a rephrasing)
-- Is at the same or higher difficulty level
+Given a code question, generate a NEW question that covers a DIFFERENT dimension:
 
-Examples:
-- If original asks "What does X do?" → ask "How does X interact with Y?"
-- If original asks "Why is X implemented this way?" → ask "What would break if X was changed?"
+DIMENSION MAP:
+- If original asks about WHAT → ask about WHY (design rationale)
+- If original asks about HOW → ask about WHEN (conditions / edge cases)
+- If original asks about design → ask about impact (what changes if we modify this?)
+- If original asks about a function → ask about its callers or callees
+- If original asks about normal flow → ask about error path
+- If original asks about current state → ask about evolution (why was it changed? what was it before?)
+
+The new question must:
+- Be independently meaningful (can stand alone)
+- Test a genuinely different aspect of understanding
+- Be answerable from the same code context
 
 Return ONLY the new question, nothing else.`
 
@@ -774,7 +798,7 @@ export async function runBatch(
  try {
  const db = getDb()
  const chunks = db.prepare(
- 'SELECT id, content, file_path, language FROM chunks WHERE project_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?'
+ 'SELECT id, content, file_path, language, chunk_type, name, dependencies, exports, line_start, line_end FROM chunks WHERE project_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?'
  ).all(projectId, batchSize, offset) as ChunkRow[]
 
  if (chunks.length === 0) {
