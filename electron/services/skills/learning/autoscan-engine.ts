@@ -35,6 +35,9 @@ export interface AutoScanConfig {
  judgeThreshold: number
  maxQuestionsPerChunk: number
  enableEvolInstruct: boolean
+ evolInDepthRatio: number
+ evolInBreadthRatio: number
+ nearMissThreshold: number
  pauseDuringChat: boolean
  enabled: boolean
  requestDelayMs: number
@@ -91,6 +94,9 @@ const DEFAULT_CONFIG: AutoScanConfig = {
  judgeThreshold: 4.0,
  maxQuestionsPerChunk: 3,
  enableEvolInstruct: true,
+ evolInDepthRatio: 0.5,
+ evolInBreadthRatio: 0.2,
+ nearMissThreshold: 3.0,
  pauseDuringChat: true,
  enabled: false,
  requestDelayMs: 500,
@@ -292,7 +298,7 @@ export class RateLimitError extends Error {
 }
 
 let lastRequestAt = 0
-const MIN_GAP_MS = 500
+const MIN_GAP_MS = Math.ceil(60_000 / 15)
 
 async function callLLM(
  systemPrompt: string,
@@ -379,61 +385,82 @@ export function resetCircuitBreaker(): void {
  consecutiveErrors = 0
 }
 
-const QUESTION_GEN_SYSTEM = `You are a code knowledge extractor. Given code chunks from a software project, generate diverse questions that developers would realistically ask.
+const QUESTION_GEN_SYSTEM = `You are a senior engineer creating training data for a code intelligence system.
+
+Given real code snippets from a production codebase, generate questions a developer would ACTUALLY search for when working with this code. Questions must reference specific implementation details — not generic descriptions.
+
+GOOD questions (grounded in specific identifiers):
+- "Why does \`CircuitBreakerState\` use a Map instead of a class instance?"
+- "What happens if \`dailyResetAt\` is in the past when \`checkDailyReset()\` runs?"
+- "How does \`consecutiveErrors\` interact with the circuit breaker state machine?"
+
+BAD questions (generic):
+- "What is the purpose of this file?"
+- "How does error handling work?"
 
 For each chunk, generate exactly 3 questions:
-1. FACTUAL: "What does X do?" / "What is the purpose of Y?" 
-2. CONCEPTUAL: "Why is Z implemented this way?" / "What pattern does this follow?"
-3. RELATIONAL: "How does this relate to other parts?" / "When would you use this?"
+1. IMPLEMENTATION: About a specific line, function, or variable in the code
+2. DESIGN: About WHY the code is structured this way (tradeoffs, patterns)
+3. INTERACTION: About how this code connects to other parts of the system
 
-Return a JSON array:
-[
- {"chunkId": "...", "questions": [
- {"type": "factual", "question": "..."},
- {"type": "conceptual", "question": "..."},
- {"type": "relational", "question": "..."}
- ]}
-]
+Return JSON:
+[{"chunkId": "...", "questions": [
+  {"type": "implementation", "question": "...", "codeRef": "<exact_identifier_from_code>"},
+  {"type": "design", "question": "...", "codeRef": "<exact_identifier_from_code>"},
+  {"type": "interaction", "question": "...", "codeRef": "<exact_identifier_from_code>"}
+]}]
 
 Rules:
-- Questions must be specific to the actual code content
-- Never generic ("What is this file?")
-- Reference actual function names, variables, patterns`
+- Each question MUST reference a specific identifier (function, variable, class) from the actual code
+- Put that exact identifier in codeRef
+- If you cannot generate a grounded question for a type, omit that question
+- Never invent identifiers not present in the snippet`
 
-const QUESTION_SUB_BATCH = 10
+const QUESTION_SUB_BATCH = 20
+
+interface GeneratedQuestion {
+ type: string
+ question: string
+ codeRef?: string
+}
+
+function isGrounded(codeRef: string | undefined, codeContent: string): boolean {
+ if (!codeRef) return true
+ return codeContent.includes(codeRef)
+}
 
 async function generateQuestionsForSubBatch(
  subChunks: ChunkRow[]
-): Promise<Map<string, Array<{ type: string; question: string }>>> {
- const result = new Map<string, Array<{ type: string; question: string }>>()
+): Promise<Map<string, GeneratedQuestion[]>> {
+ const result = new Map<string, GeneratedQuestion[]>()
  const chunksContext = subChunks.map(c =>
- `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})\n${c.content.slice(0, 600)}`
+  `[ChunkID: ${c.id}]\nFile: ${c.file_path} (${c.language})\n${c.content.slice(0, 600)}`
  ).join('\n\n---\n\n')
 
  try {
- const raw = await callLLM(
- QUESTION_GEN_SYSTEM,
- `Generate questions for these ${subChunks.length} chunks:\n\n${chunksContext}`,
- 0.8,
- 8192,
- `q-gen ${subChunks.length}chunks`
- )
+  const raw = await callLLM(
+   QUESTION_GEN_SYSTEM,
+   `Generate questions for these ${subChunks.length} chunks:\n\n${chunksContext}`,
+   0.8,
+   4096,
+   `q-gen ${subChunks.length}chunks`
+  )
 
- const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[|\s*```)/s) || raw.match(/\[[\s\S]*\]/)
- if (!jsonMatch) return result
+  const jsonMatch = raw.match(/\[[\s\S]*?\](?=\s*$|\s*\n\s*\[|\s*```)/s) || raw.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return result
 
- const parsed = JSON.parse(jsonMatch[0]) as Array<{
- chunkId: string
- questions: Array<{ type: string; question: string }>
- }>
+  const parsed = JSON.parse(jsonMatch[0]) as Array<{
+   chunkId: string
+   questions: GeneratedQuestion[]
+  }>
 
- for (const item of parsed) {
- if (item.chunkId && Array.isArray(item.questions)) {
- result.set(item.chunkId, item.questions)
- }
- }
+  for (const item of parsed) {
+   if (item.chunkId && Array.isArray(item.questions)) {
+    result.set(item.chunkId, item.questions)
+   }
+  }
  } catch (err) {
- logTrain(`Sinh câu hỏi thất bại (sub-batch ${subChunks.length} chunks): ${(err as Error).message}`)
+  logTrain(`Sinh câu hỏi thất bại (sub-batch ${subChunks.length} chunks): ${(err as Error).message}`)
  }
 
  return result
@@ -441,17 +468,17 @@ async function generateQuestionsForSubBatch(
 
 export async function generateQuestionsForChunks(
  chunks: ChunkRow[]
-): Promise<Map<string, Array<{ type: string; question: string }>>> {
- const result = new Map<string, Array<{ type: string; question: string }>>()
+): Promise<Map<string, GeneratedQuestion[]>> {
+ const result = new Map<string, GeneratedQuestion[]>()
  if (chunks.length === 0) return result
 
  for (let i = 0; i < chunks.length; i += QUESTION_SUB_BATCH) {
- const sub = chunks.slice(i, i + QUESTION_SUB_BATCH)
- const subResult = await generateQuestionsForSubBatch(sub)
- for (const [k, v] of subResult) result.set(k, v)
- if (i + QUESTION_SUB_BATCH < chunks.length) {
-  await sleep(config.requestDelayMs)
- }
+  const sub = chunks.slice(i, i + QUESTION_SUB_BATCH)
+  const subResult = await generateQuestionsForSubBatch(sub)
+  for (const [k, v] of subResult) result.set(k, v)
+  if (i + QUESTION_SUB_BATCH < chunks.length) {
+   await sleep(config.requestDelayMs)
+  }
  }
 
  return result
@@ -474,16 +501,18 @@ export async function answerQuestion(
  return callLLM(ANSWER_SYSTEM, userContent, 0.2, 1024, `answer | ${truncate(question, 60)}`)
 }
 
-const JUDGE_SYSTEM = `You are a quality judge for code Q&A training data. Score strictly.
+const JUDGE_SYSTEM = `You are a strict quality judge for code Q&A training data used to train developer AI assistants.
 
-Evaluate on 4 criteria (1-5 each):
-1. RELEVANCE: Does the question actually relate to the provided code?
-2. SPECIFICITY: Does the answer cite specific code elements (functions, files, patterns)?
-3. CORRECTNESS: Is the answer factually accurate based on the code?
-4. USEFULNESS: Would this help a developer understand the codebase?
+Evaluate this Q&A pair on 4 criteria (score 1-5):
+1. RELEVANCE (1-5): Does the question specifically reference elements from the provided code? (1=generic, 5=cites exact functions/variables)
+2. FACTUAL_ACCURACY (1-5): Is the answer verifiably correct based on the code? (1=contradicts code, 5=perfectly accurate)
+3. SPECIFICITY (1-5): Does the answer cite specific code elements with file paths or function signatures? (1=vague, 5=very specific)
+4. DEVELOPER_VALUE (1-5): Would a developer find this genuinely useful? (1=useless, 5=saves significant time)
+
+CRITICAL RULE: If FACTUAL_ACCURACY < 3, reject regardless of other scores.
 
 Return JSON only:
-{"relevance": N, "specificity": N, "correctness": N, "usefulness": N, "average": N, "reasoning": "..."}`
+{"relevance": N, "factual_accuracy": N, "specificity": N, "developer_value": N, "reasoning": "one sentence"}`
 
 export async function judgeQAPair(
  question: string,
@@ -493,49 +522,150 @@ export async function judgeQAPair(
  const userContent = `Code:\n${codeContext.slice(0, 600)}\n\nQ: ${question}\nA: ${answer}`
 
  try {
- const raw = await callLLM(JUDGE_SYSTEM, userContent, 0.1, 512, `judge | ${truncate(question, 50)}`)
- const jsonMatch = raw.match(/\{[\s\S]*\}/)
- if (!jsonMatch) return { score: 0, accepted: false, reasoning: 'parse_failed' }
+  const raw = await callLLM(JUDGE_SYSTEM, userContent, 0.1, 512, `judge | ${truncate(question, 50)}`)
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) return { score: 0, accepted: false, reasoning: 'parse_failed' }
 
- const parsed = JSON.parse(jsonMatch[0]) as {
- relevance: number
- specificity: number
- correctness: number
- usefulness: number
- average: number
- reasoning: string
- }
+  const parsed = JSON.parse(jsonMatch[0]) as {
+   relevance: number
+   factual_accuracy: number
+   specificity: number
+   developer_value: number
+   reasoning: string
+  }
 
- const avg = parsed.average ||
- (parsed.relevance + parsed.specificity + parsed.correctness + parsed.usefulness) / 4
+  const hardReject = (parsed.factual_accuracy ?? 5) < 3
+  const avg = (
+   (parsed.relevance ?? 0) +
+   (parsed.factual_accuracy ?? 0) +
+   (parsed.specificity ?? 0) +
+   (parsed.developer_value ?? 0)
+  ) / 4
 
- return {
- score: avg,
- accepted: avg >= config.judgeThreshold,
- reasoning: parsed.reasoning || ''
- }
+  return {
+   score: avg,
+   accepted: !hardReject && avg >= config.judgeThreshold,
+   reasoning: parsed.reasoning || ''
+  }
  } catch (err) {
- logTrain(`Judge thất bại: ${(err as Error).message}`)
- return { score: 0, accepted: false, reasoning: 'error' }
+  logTrain(`Judge thất bại: ${(err as Error).message}`)
+  return { score: 0, accepted: false, reasoning: 'error' }
  }
 }
 
-const EVOL_SYSTEM = `You are an instruction evolution expert. Take a simple code question and make it significantly more complex and insightful.
+const EVOL_INDEPTH_SYSTEM = `You are an expert at making code questions more challenging.
 
-Evolution strategies:
-- Add constraints ("...without using X")
-- Request comparison ("...vs Y approach") 
-- Add edge case ("...and what happens when Z fails?")
-- Require reasoning ("...and explain the tradeoffs")
+Given a code question, rewrite it using ONE of these strategies:
+1. ADD CONSTRAINT: Add a requirement that limits the solution ("...without using X", "...with O(1) memory")
+2. DEEPEN REASONING: Require explanation of WHY, not just WHAT ("...and explain the tradeoffs between approaches")
+3. CONCRETIZE: Replace vague terms with specific scenarios ("...when handling 1000 concurrent requests")
+4. EDGE CASES: Add a failure scenario ("...and what happens when the input is null or the service is unavailable")
 
-Return ONLY the evolved question, nothing else.`
+Rules:
+- Question MUST still be answerable from the provided code context
+- Keep under 150 words
+- If you cannot make it meaningfully harder, return exactly: ELIMINATE
+- Return ONLY the rewritten question, nothing else`
+
+const EVOL_INBREADTH_SYSTEM = `You are an expert at generating diverse code questions.
+
+Given a code question, generate a NEW question that:
+- Covers a DIFFERENT aspect of the same code (not a rephrasing)
+- Is at the same or higher difficulty level
+
+Examples:
+- If original asks "What does X do?" → ask "How does X interact with Y?"
+- If original asks "Why is X implemented this way?" → ask "What would break if X was changed?"
+
+Return ONLY the new question, nothing else.`
+
+async function evolveQuestionSystematic(
+ question: string,
+ codeContent: string,
+ strategy: 'indepth' | 'inbreadth'
+): Promise<{ evolved: string; eliminated: boolean }> {
+ try {
+  const system = strategy === 'indepth' ? EVOL_INDEPTH_SYSTEM : EVOL_INBREADTH_SYSTEM
+  const userContent = `Code context:\n${codeContent.slice(0, 400)}\n\nQuestion:\n${question}`
+  const result = await callLLM(system, userContent, 0.9, 300, `evol-${strategy} | ${truncate(question, 40)}`)
+  const trimmed = result.trim()
+  const lower = trimmed.toLowerCase()
+  if (
+   !trimmed ||
+   trimmed === 'ELIMINATE' ||
+   lower.includes("i'm sorry") ||
+   lower.includes('as an ai') ||
+   trimmed.length < 10 ||
+   trimmed.split(' ').length > 150
+  ) {
+   return { evolved: question, eliminated: true }
+  }
+  return { evolved: trimmed, eliminated: false }
+ } catch {
+  return { evolved: question, eliminated: true }
+ }
+}
 
 export async function evolveQuestion(question: string): Promise<string> {
+ const { evolved } = await evolveQuestionSystematic(question, '', 'indepth')
+ return evolved
+}
+
+function computeUnigrams(text: string): Set<string> {
+ return new Set(
+  text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean)
+ )
+}
+
+function rouge1Similarity(a: string, b: string): number {
+ const ua = computeUnigrams(a)
+ const ub = computeUnigrams(b)
+ if (ua.size === 0 || ub.size === 0) return 0
+ let overlap = 0
+ for (const token of ua) { if (ub.has(token)) overlap++ }
+ return overlap / Math.max(ua.size, ub.size)
+}
+
+const questionCache = new Map<string, string[]>()
+let questionCacheTs = 0
+const QUESTION_CACHE_TTL = 5 * 60 * 1000
+const ROUGE_THRESHOLD = 0.7
+
+function isDuplicateQuestion(question: string, projectId: string): boolean {
+ const now = Date.now()
+ if (now - questionCacheTs > QUESTION_CACHE_TTL || !questionCache.has(projectId)) {
+  try {
+   const db = getDb()
+   const rows = db.prepare(
+    'SELECT query FROM training_pairs WHERE project_id = ? ORDER BY created_at DESC LIMIT 500'
+   ).all(projectId) as Array<{ query: string }>
+   questionCache.set(projectId, rows.map(r => r.query))
+   questionCacheTs = now
+  } catch {
+   return false
+  }
+ }
+ const existing = questionCache.get(projectId) ?? []
+ return existing.some(q => rouge1Similarity(question, q) >= ROUGE_THRESHOLD)
+}
+
+export async function saveNearMissPair(
+ projectId: string,
+ question: string,
+ chunkId: string,
+ judgeScore: number
+): Promise<void> {
  try {
- const result = await callLLM(EVOL_SYSTEM, question, 0.9, 256, `evol | ${truncate(question, 50)}`)
- return result.trim() || question
- } catch {
- return question
+  const db = getDb()
+  const weight = (judgeScore - 2.0) / 5.0
+  trainingPairQueries.insert(db).run(
+   randomUUID(), projectId, question, chunkId,
+   -0.1,
+   'autoscan',
+   weight
+  )
+ } catch (err) {
+  logLearn(`Lưu near-miss thất bại: ${(err as Error).message}`)
  }
 }
 
@@ -612,46 +742,75 @@ export async function runBatch(
  chunksScanned = chunks.length
 
  for (const chunk of chunks) {
- if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-  logScan(`[Code] Circuit breaker OPEN — dừng batch sớm`)
-  break
- }
-
- const questions = questionMap.get(chunk.id) || []
- const topic = chunk.file_path.split('/').slice(-2).join('/')
-
- for (const qItem of questions) {
-  let question = qItem.question
-  pairsGenerated++
-
-  if (config.enableEvolInstruct && Math.random() < 0.3) {
-  logTrain(`[Evol-Instruct] Chủ đề: ${topic} | Câu gốc: "${truncate(question, 60)}"`)
-  setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'generating', timestamp: Date.now() })
-  question = await evolveQuestion(question)
-  await sleep(config.requestDelayMs)
+  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+   logScan(`[Code] Circuit breaker OPEN — dừng batch sớm`)
+   break
   }
 
-  logTrain(`[Code/${qItem.type}] ${topic} | Q: "${truncate(question, 80)}"`)
-  setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'answering', timestamp: Date.now() })
-  const answer = await answerQuestion(question, chunk.content, chunk.file_path)
-  await sleep(config.requestDelayMs)
-  if (!answer) { pairsRejected++; continue }
+  const rawQuestions = questionMap.get(chunk.id) || []
+  const topic = chunk.file_path.split('/').slice(-2).join('/')
 
-  setActivity({ filePath: chunk.file_path, question, answer, score: 0, status: 'judging', timestamp: Date.now() })
-  const judgment = await judgeQAPair(question, answer, chunk.content)
-  await sleep(config.requestDelayMs)
+  const grounded = rawQuestions.filter(q => isGrounded(q.codeRef, chunk.content))
+  const skipped = rawQuestions.length - grounded.length
+  if (skipped > 0) pairsRejected += skipped
 
-  if (judgment.accepted) {
-  setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'accepted', timestamp: Date.now() })
-  await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
-  pairsAccepted++
-  logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
-  } else {
-  setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
-  logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
-  pairsRejected++
+  const toProcess: Array<{ question: string; type: string; evolved: boolean }> = []
+
+  for (const qItem of grounded) {
+   let question = qItem.question
+
+   if (config.enableEvolInstruct && Math.random() < config.evolInDepthRatio) {
+    setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'generating', timestamp: Date.now() })
+    const { evolved, eliminated } = await evolveQuestionSystematic(question, chunk.content, 'indepth')
+    if (!eliminated) {
+     logTrain(`[Evol-InDepth] ${topic} | "${truncate(evolved, 60)}"`)
+     question = evolved
+    }
+   }
+
+   toProcess.push({ question, type: qItem.type, evolved: false })
+
+   if (config.enableEvolInstruct && Math.random() < config.evolInBreadthRatio) {
+    setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'generating', timestamp: Date.now() })
+    const { evolved, eliminated } = await evolveQuestionSystematic(question, chunk.content, 'inbreadth')
+    if (!eliminated) {
+     logTrain(`[Evol-InBreadth] ${topic} | "${truncate(evolved, 60)}"`)
+     toProcess.push({ question: evolved, type: 'breadth', evolved: true })
+    }
+   }
   }
- }
+
+  for (const { question, type } of toProcess) {
+   pairsGenerated++
+   logTrain(`[Code/${type}] ${topic} | Q: "${truncate(question, 80)}"`)
+   setActivity({ filePath: chunk.file_path, question, answer: '', score: 0, status: 'answering', timestamp: Date.now() })
+   const answer = await answerQuestion(question, chunk.content, chunk.file_path)
+   if (!answer) { pairsRejected++; continue }
+
+   setActivity({ filePath: chunk.file_path, question, answer, score: 0, status: 'judging', timestamp: Date.now() })
+   const judgment = await judgeQAPair(question, answer, chunk.content)
+
+   if (judgment.accepted) {
+    if (isDuplicateQuestion(question, projectId)) {
+     logLearn(`[Code] Bỏ duplicate | "${truncate(question, 60)}"`)
+     questionCache.delete(projectId)
+     pairsRejected++
+     continue
+    }
+    setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'accepted', timestamp: Date.now() })
+    await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
+    questionCache.delete(projectId)
+    pairsAccepted++
+    logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
+   } else {
+    setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
+    logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
+    if (judgment.score >= config.nearMissThreshold && !isDuplicateQuestion(question, projectId)) {
+     await saveNearMissPair(projectId, question, chunk.id, judgment.score)
+    }
+    pairsRejected++
+   }
+  }
  }
 
  const elapsed = Date.now() - start
