@@ -415,38 +415,38 @@ const markdownComponents = {
       </code>
     )
   },
-  pre({ children }: { children: ReactNode }) {
+  pre({ children }: { children?: ReactNode }) {
     // Let the code component handle all rendering
     return <>{children}</>
   },
-  h1({ children }: { children: ReactNode }) {
+  h1({ children }: { children?: ReactNode }) {
     return <h1 className="text-[20px] font-bold mt-5 mb-2.5 pb-2 border-b border-[var(--border-primary)]">{children}</h1>
   },
-  h2({ children }: { children: ReactNode }) {
+  h2({ children }: { children?: ReactNode }) {
     return <h2 className="text-[17px] font-semibold mt-5 mb-2 text-[var(--text-primary)]">{children}</h2>
   },
-  h3({ children }: { children: ReactNode }) {
+  h3({ children }: { children?: ReactNode }) {
     return <h3 className="text-[15px] font-semibold mt-4 mb-1.5 text-[var(--text-primary)]">{children}</h3>
   },
-  h4({ children }: { children: ReactNode }) {
+  h4({ children }: { children?: ReactNode }) {
     return <h4 className="text-[14px] font-semibold mt-3 mb-1 text-[var(--text-secondary)]">{children}</h4>
   },
-  ul({ children }: { children: ReactNode }) {
+  ul({ children }: { children?: ReactNode }) {
     return <ul className="cortex-ul my-2 pl-5 space-y-1">{children}</ul>
   },
-  ol({ children, start }: { children: ReactNode; start?: number }) {
+  ol({ children, start }: { children?: ReactNode; start?: number }) {
     return <ol start={start} className="cortex-ol my-2.5 space-y-2">{children}</ol>
   },
-  li({ children }: { children: ReactNode }) {
+  li({ children }: { children?: ReactNode }) {
     return <li className="cortex-li leading-[1.7]">{children}</li>
   },
-  strong({ children }: { children: ReactNode }) {
+  strong({ children }: { children?: ReactNode }) {
     return <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>
   },
-  em({ children }: { children: ReactNode }) {
+  em({ children }: { children?: ReactNode }) {
     return <em className="italic text-[var(--text-secondary)]">{children}</em>
   },
-  a({ href, children }: { href?: string; children: ReactNode }) {
+  a({ href, children }: { href?: string; children?: ReactNode }) {
     return (
       <a
         href={href}
@@ -458,24 +458,24 @@ const markdownComponents = {
       </a>
     )
   },
-  table({ children }: { children: ReactNode }) {
+  table({ children }: { children?: ReactNode }) {
     return (
       <div className="overflow-x-auto my-3">
         <table className="w-full text-[13px] border-collapse border border-[var(--border-primary)] rounded-lg">{children}</table>
       </div>
     )
   },
-  th({ children }: { children: ReactNode }) {
+  th({ children }: { children?: ReactNode }) {
     return (
       <th className="bg-[var(--bg-secondary)] px-3 py-2 text-left font-semibold border border-[var(--border-primary)]">{children}</th>
     )
   },
-  td({ children }: { children: ReactNode }) {
+  td({ children }: { children?: ReactNode }) {
     return (
       <td className="px-3 py-2 border border-[var(--border-primary)]">{children}</td>
     )
   },
-  blockquote({ children }: { children: ReactNode }) {
+  blockquote({ children }: { children?: ReactNode }) {
     return (
       <blockquote className="border-l-3 border-[var(--accent-primary)] pl-4 my-3 text-[var(--text-secondary)] italic">{children}</blockquote>
     )
@@ -499,7 +499,7 @@ const markdownComponents = {
   hr() {
     return <hr className="my-4 border-[var(--border-primary)]" />
   },
-  p({ children }: { children: ReactNode }) {
+  p({ children }: { children?: ReactNode }) {
     // Extract text content to check for tree structures
     const textContent = extractTextContent(children)
     if (textContent && hasTreeStructure(textContent) && textContent.includes('\n')) {
@@ -554,42 +554,31 @@ function FeedbackButtons({ messageId, onFeedback }: { messageId: string; onFeedb
 const EMPTY_STEPS: { step: 'sanitize' | 'rag' | 'external_context' | 'web_search' | 'build_prompt' | 'streaming'; status: 'running' | 'done' | 'skipped' | 'error'; label: string; detail?: string; durationMs?: number }[] = []
 
 function StreamingContent({ conversationId }: { conversationId: string }) {
-  const streamRef = useRef<HTMLDivElement>(null)
-  const rafRef = useRef<number>(0)
-  const lastContentRef = useRef('')
+  const [displayContent, setDisplayContent] = useState('')
 
   useEffect(() => {
     const unsub = useChatStore.subscribe((state) => {
       const conv = state.conversations.find((c) => c.id === conversationId)
       const lastMsg = conv?.messages[conv.messages.length - 1]
-      const content = lastMsg?.content ?? ''
-      if (content === lastContentRef.current) return
-      lastContentRef.current = content
-
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      rafRef.current = requestAnimationFrame(() => {
-        if (streamRef.current) {
-          let display = content
-            .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
-            .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
-            .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
-            .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
-            .trim()
-          streamRef.current.textContent = display || (content.includes('tool_call') || content.includes('CORTEX_IMG') ? '🎨 Generating image...' : '')
-        }
-      })
+      const raw = lastMsg?.content ?? ''
+      const cleaned = raw
+        .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+        .replace(/!\[.*?\]\(cortex-image:\/\/[^)]+\)/g, '🎨 Generating image...')
+        .replace(/\[CORTEX_IMG:[^\]]+\]/g, '🎨 Image generated!')
+        .replace(/CORTEX_IMAGE_PATH:[^\n]+/g, '')
+        .trim()
+      setDisplayContent(cleaned || (raw.includes('tool_call') || raw.includes('CORTEX_IMG') ? '🎨 Generating image...' : ''))
     })
-    return () => {
-      unsub()
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    }
+    return () => unsub()
   }, [conversationId])
 
   return (
     <div
-      ref={streamRef}
-      className="text-[15px] leading-[1.7] text-[var(--text-primary)] break-words whitespace-pre-wrap typing-cursor stream-fade-in"
-    />
+      className="text-[15px] leading-[1.7] text-[var(--text-primary)] prose-cortex break-words"
+      data-streaming="true"
+    >
+      <MemoizedMarkdown content={displayContent} />
+    </div>
   )
 }
 
@@ -688,19 +677,6 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
   const isUser = message.role === 'user'
   const isStreamingEmpty = message.isStreaming && !message.content
   const thinkingSteps = useChatStore((s) => s.thinkingSteps.get(message.conversationId)) ?? EMPTY_STEPS
-  const [showMarkdown, setShowMarkdown] = useState(!message.isStreaming && !!message.content)
-  const wasStreamingRef = useRef(message.isStreaming)
-
-  useEffect(() => {
-    if (wasStreamingRef.current && !message.isStreaming && message.content) {
-      const timer = setTimeout(() => setShowMarkdown(true), 50)
-      return () => clearTimeout(timer)
-    }
-    if (!message.isStreaming && message.content) {
-      setShowMarkdown(true)
-    }
-    wasStreamingRef.current = message.isStreaming
-  }, [message.isStreaming, message.content])
 
   return (
     <div className="message-enter">
@@ -778,13 +754,9 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
             </div>
           ) : message.isStreaming ? (
             <StreamingContent conversationId={message.conversationId} />
-          ) : showMarkdown ? (
+          ) : (
             <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] prose-cortex break-words stream-fade-in">
               <ContentWithImages content={message.content} />
-            </div>
-          ) : (
-            <div className="text-[15px] leading-[1.7] text-[var(--text-primary)] break-words whitespace-pre-wrap">
-              {message.content}
             </div>
           )}
 

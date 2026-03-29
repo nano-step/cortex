@@ -273,6 +273,36 @@ html, body, #root {
   animation: streamFadeIn 0.25s ease-out forwards;
 }
 
+/* Streaming markdown: blinking cursor at end of last block */
+[data-streaming="true"] p:last-of-type::after,
+[data-streaming="true"] li:last-child::after,
+[data-streaming="true"] h1:last-of-type::after,
+[data-streaming="true"] h2:last-of-type::after,
+[data-streaming="true"] h3:last-of-type::after,
+[data-streaming="true"] > div:last-child::after {
+  content: '▊';
+  display: inline;
+  color: var(--accent-primary);
+  animation: blink 1s step-end infinite;
+  font-size: 14px;
+  margin-left: 1px;
+}
+
+[data-streaming="true"] p,
+[data-streaming="true"] h1,
+[data-streaming="true"] h2,
+[data-streaming="true"] h3,
+[data-streaming="true"] li,
+[data-streaming="true"] pre,
+[data-streaming="true"] blockquote {
+  animation: streamTokenIn 0.12s ease-out both;
+}
+
+@keyframes streamTokenIn {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
 /* ChatGPT-style dot pulse for typing indicator */
 @keyframes dotPulse {
   0%, 80%, 100% { opacity: 0.2; }

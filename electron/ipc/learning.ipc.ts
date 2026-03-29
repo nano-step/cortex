@@ -5,12 +5,17 @@ import { trainFromPairs, getLearnedWeightCount } from '../services/learned-reran
 import { initDefaultVariant } from '../services/query-optimizer'
 import { getCompressionStats } from '../services/skills/efficiency/cost-tracker'
 import { optimizePrompt } from '../services/skills/learning/prompt-optimizer'
-import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig } from '../services/skills/learning/autoscan-engine'
+import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig, onActivityUpdate } from '../services/skills/learning/autoscan-engine'
 import { triggerManualTraining } from '../services/training/training-engine'
+import { getRunHistory } from '../services/training/training-db'
 import { checkForUpdates } from '../services/updater-service'
 import { getAuditLog } from '../services/audit-service'
 
 export function registerLearningIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
+  onActivityUpdate((activity) => {
+    getMainWindow()?.webContents.send('autoscan:activity', activity)
+  })
+
   ipcMain.handle(
     'learning:sendFeedback',
     (_event, messageId: string, conversationId: string, projectId: string, signalType: string, query: string, chunkIds: string[]) => {
@@ -89,6 +94,192 @@ export function registerLearningIPC(ipcMain: IpcMain, getMainWindow: () => Brows
   ipcMain.handle('autoscan:trigger', (_event, projectId: string) => {
     triggerManualTraining('autoscan', projectId)
     return true
+  })
+
+  // =====================
+  // Training Intelligence — Timeline & History
+  // =====================
+
+  ipcMain.handle('training:getTimeline', (_event, projectId: string, granularity: 'hour' | 'day' = 'day', sinceMs?: number) => {
+    try {
+      const db = getDb()
+      const since = sinceMs ?? Date.now() - 30 * 24 * 60 * 60 * 1000
+      if (granularity === 'hour') {
+        const rows = db.prepare(`
+          SELECT
+            STRFTIME('%H', created_at / 1000, 'unixepoch') as hour,
+            COUNT(*) as count,
+            SUM(CASE WHEN source = 'autoscan' THEN 1 ELSE 0 END) as autoscan_count,
+            SUM(CASE WHEN label > 0 THEN 1 ELSE 0 END) as positive_count
+          FROM training_pairs
+          WHERE project_id = ? AND created_at > ?
+          GROUP BY hour
+          ORDER BY hour ASC
+        `).all(projectId, since) as Array<{ hour: string; count: number; autoscan_count: number; positive_count: number }>
+        const filled: Array<{ hour: string; count: number; autoscan_count: number; positive_count: number }> = []
+        for (let h = 0; h < 24; h++) {
+          const key = String(h).padStart(2, '0')
+          const found = rows.find(r => r.hour === key)
+          filled.push({ hour: key, count: found?.count ?? 0, autoscan_count: found?.autoscan_count ?? 0, positive_count: found?.positive_count ?? 0 })
+        }
+        return filled
+      }
+      const rows = db.prepare(`
+        SELECT
+          DATE(created_at / 1000, 'unixepoch') as day,
+          COUNT(*) as count,
+          SUM(CASE WHEN source = 'autoscan' THEN 1 ELSE 0 END) as autoscan_count,
+          SUM(CASE WHEN label > 0 THEN 1 ELSE 0 END) as positive_count
+        FROM training_pairs
+        WHERE project_id = ? AND created_at > ?
+        GROUP BY day
+        ORDER BY day DESC
+      `).all(projectId, since)
+      return rows
+    } catch { return [] }
+  })
+
+  ipcMain.handle('training:getRecentPairs', (_event, projectId: string, limit: number = 20) => {
+    try {
+      const db = getDb()
+      const rows = db.prepare(`
+        SELECT
+          MIN(tp.id) as id,
+          tp.query,
+          tp.source,
+          tp.label,
+          MAX(tp.created_at) as created_at,
+          c.file_path,
+          c.language,
+          COUNT(*) as feedback_count,
+          SUM(CASE WHEN tp.label > 0 THEN 1 ELSE 0 END) as positive_count,
+          SUM(CASE WHEN tp.label < 0 THEN 1 ELSE 0 END) as negative_count
+        FROM training_pairs tp
+        LEFT JOIN chunks c ON tp.chunk_id = c.id
+        WHERE tp.project_id = ?
+          AND LENGTH(TRIM(tp.query)) >= 10
+          AND tp.source NOT IN ('implicit_positive', 'implicit_negative')
+        GROUP BY LOWER(TRIM(tp.query))
+        ORDER BY MAX(tp.created_at) DESC
+        LIMIT ?
+      `).all(projectId, limit)
+      return rows
+    } catch { return [] }
+  })
+
+  ipcMain.handle('training:getRunHistory', () => {
+    try {
+      return getRunHistory(50)
+    } catch { return [] }
+  })
+
+  ipcMain.handle('training:getIntelligenceScore', (_event, projectId: string) => {
+    try {
+      const db = getDb()
+
+      const pairsRow = db.prepare('SELECT COUNT(*) as count FROM training_pairs WHERE project_id = ?').get(projectId) as { count: number } | undefined
+      const weightsRow = db.prepare('SELECT COUNT(*) as count FROM learned_weights WHERE project_id = ?').get(projectId) as { count: number } | undefined
+      const feedbackRow = db.prepare(`
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN signal_type IN ('thumbs_up', 'copy', 'no_follow_up') THEN 1 ELSE 0 END) as positive
+        FROM feedback_signals WHERE project_id = ?
+      `).get(projectId) as { total: number; positive: number } | undefined
+      const compression = getCompressionStats(projectId)
+
+      const autoscanPairsRow = db.prepare(`
+        SELECT COUNT(*) as accepted FROM training_pairs
+        WHERE project_id = ? AND source = 'autoscan'
+      `).get(projectId) as { accepted: number } | undefined
+
+      const chunksScannedRow = db.prepare(`
+        SELECT COUNT(DISTINCT chunk_id) as scanned FROM training_pairs
+        WHERE project_id = ? AND source = 'autoscan'
+      `).get(projectId) as { scanned: number } | undefined
+
+      const chunksRow = db.prepare('SELECT COUNT(*) as count FROM chunks WHERE project_id = ?').get(projectId) as { count: number } | undefined
+
+      const runsRow = db.prepare(`
+        SELECT COUNT(*) as count FROM training_runs
+        WHERE pipeline = 'autoscan' AND status = 'completed'
+        AND (project_id = ? OR project_id IS NULL)
+      `).get(projectId) as { count: number } | undefined
+
+      const pairsCount = pairsRow?.count ?? 0
+      const weightsCount = weightsRow?.count ?? 0
+      const feedbackTotal = feedbackRow?.total ?? 0
+      const feedbackPositive = feedbackRow?.positive ?? 0
+      const autoscanAccepted = autoscanPairsRow?.accepted ?? 0
+      const chunksScanned = chunksScannedRow?.scanned ?? 0
+      const chunksTotal = chunksRow?.count ?? 0
+
+      const pairsScore = Math.min(40, (pairsCount / 1000) * 40)
+      const weightsScore = Math.min(30, (weightsCount / 500) * 30)
+      const feedbackScore = feedbackTotal > 0 ? (feedbackPositive / feedbackTotal) * 20 : 0
+      const compressionScore = Math.min(10, (compression.savingsPercent / 100) * 10)
+
+      const score = Math.round(pairsScore + weightsScore + feedbackScore + compressionScore)
+      return {
+        score,
+        breakdown: {
+          pairs: Math.round(pairsScore),
+          weights: Math.round(weightsScore),
+          feedback: Math.round(feedbackScore),
+          compression: Math.round(compressionScore)
+        },
+        rawCounts: {
+          pairs: pairsCount,
+          weights: weightsCount,
+          feedback: feedbackTotal,
+          compressionPercent: compression.savingsPercent,
+          chunksTotal,
+          chunksScanned,
+          autoscanRuns: runsRow?.count ?? 0,
+          autoscanPairsAccepted: autoscanAccepted,
+          autoscanChunksScanned: chunksScanned,
+          autoscanPairsGenerated: pairsCount,
+          autoscanAcceptanceRate: chunksTotal > 0
+            ? Math.round((chunksScanned / chunksTotal) * 100)
+            : 0
+        }
+      }
+    } catch (err) {
+      console.error('[Intelligence] Score calc failed:', err)
+      return { score: 0, breakdown: { pairs: 0, weights: 0, feedback: 0, compression: 0 }, rawCounts: { pairs: 0, weights: 0, feedback: 0, compressionPercent: 0, chunksTotal: 0, chunksScanned: 0, autoscanRuns: 0, autoscanPairsAccepted: 0, autoscanChunksScanned: 0, autoscanPairsGenerated: 0, autoscanAcceptanceRate: 0 } }
+    }
+  })
+
+  ipcMain.handle('training:getTopTopics', (_event, projectId: string, sinceMs: number) => {
+    try {
+      const db = getDb()
+      const rows = db.prepare(`
+        SELECT c.file_path, c.language, COUNT(*) as pair_count
+        FROM training_pairs tp
+        LEFT JOIN chunks c ON tp.chunk_id = c.id
+        WHERE tp.project_id = ? AND tp.created_at > ? AND c.file_path IS NOT NULL
+        GROUP BY c.file_path
+        ORDER BY pair_count DESC
+        LIMIT 10
+      `).all(projectId, sinceMs)
+      return rows
+    } catch { return [] }
+  })
+
+  ipcMain.handle('training:getUpcomingWork', (_event, projectId: string) => {
+    try {
+      const db = getDb()
+      const rows = db.prepare(`
+        SELECT file_path, language, COUNT(*) as chunk_count
+        FROM chunks
+        WHERE project_id = ?
+          AND id NOT IN (
+            SELECT DISTINCT chunk_id FROM training_pairs WHERE project_id = ?
+          )
+        GROUP BY file_path
+        ORDER BY chunk_count DESC
+        LIMIT 10
+      `).all(projectId, projectId)
+      return rows
+    } catch { return [] }
   })
 
   ipcMain.handle('updater:checkForUpdates', async () => checkForUpdates())

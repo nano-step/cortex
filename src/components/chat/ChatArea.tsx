@@ -7,14 +7,60 @@ import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { EmptyState } from './EmptyState'
 import { Tooltip } from '../ui/Tooltip'
-import { Brain, RefreshCw, ChevronDown, Cpu, FolderPlus, Network, BarChart3, Zap, X, Database, Puzzle, GraduationCap, Bot } from 'lucide-react'
+import { Brain, RefreshCw, ChevronDown, Cpu, FolderPlus, Network, BarChart3, Zap, X, Database, Puzzle, GraduationCap, Bot, ListOrdered, Clock } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { AddRepoModal } from '../project/AddRepoModal'
+
+interface QueuedItem {
+  id: string
+  content: string
+  queuedAt: number
+}
+
+function QueueBanner({ items, onClear }: { items: QueuedItem[]; onClear: () => void }) {
+  if (items.length === 0) return null
+  return (
+    <div className="px-6 pb-2">
+      <div className="max-w-[720px] mx-auto">
+        <div className={cn(
+          'flex items-center gap-2.5 px-3 py-2 rounded-xl',
+          'bg-[var(--accent-light)] border border-[var(--accent-primary)]/20',
+          'animate-in slide-in-from-bottom-2 duration-200'
+        )}>
+          <ListOrdered size={13} className="text-[var(--accent-primary)] shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-[12px] font-medium text-[var(--accent-primary)]">
+              {items.length} tin nhắn đang chờ xử lý
+            </span>
+            <div className="flex gap-1.5 mt-1 flex-wrap">
+              {items.map((item, i) => (
+                <span
+                  key={item.id}
+                  className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)] bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-2 py-0.5 max-w-[200px]"
+                >
+                  <Clock size={9} className="shrink-0 text-[var(--text-tertiary)]" />
+                  <span className="truncate">{i + 1}. {item.content.length > 40 ? item.content.slice(0, 40) + '…' : item.content}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={onClear}
+            className="shrink-0 p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-all"
+            title="Huỷ hàng đợi"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function ChatArea() {
   const { activeProjectId, projects, activeBranch } = useProjectStore()
   const { conversations, activeConversationId, addMessage, createConversation, loadConversations, setMessageStreaming } = useChatStore()
-  const { mode, setArchitectureOpen, setDashboardOpen, setMemoryOpen, setSkillsOpen, setLearningOpen, setAgentOpen } = useUIStore()
+  const { mode, setArchitectureOpen, setDashboardOpen, setMemoryOpen, setSkillsOpen, setLearningOpen, setAgentOpen, setTrainingIntelligenceOpen } = useUIStore()
   const syncState = useSyncStore()
   const { isSyncing, hasFileChanges, lastSyncAt } = syncState
 
@@ -35,6 +81,9 @@ export function ChatArea() {
   const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   // Add repo modal state
   const [addRepoModalOpen, setAddRepoModalOpen] = useState(false)
+
+  const [messageQueue, setMessageQueue] = useState<QueuedItem[]>([])
+  const processingRef = useRef(false)
 
   // Implicit feedback timing refs
   const lastAssistantTimestamp = useRef<number | null>(null)
@@ -317,7 +366,7 @@ export function ChatArea() {
     )
   }, [activeProjectId, validConversation])
 
-  const handleSend = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[], agentModeId?: string | null) => {
+  const sendMessageNow = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[], agentModeId?: string | null) => {
     if (!activeProjectId) return
 
     let convId: string | null | undefined = validConversation?.id
@@ -413,7 +462,47 @@ export function ChatArea() {
     }
   }, [activeProjectId, validConversation, mode, addMessage, createConversation])
 
-  // No project selected
+  const handleSend = useCallback(async (content: string, attachments?: import('../../types').ChatAttachment[], agentModeId?: string | null) => {
+    const isStreaming = validConversation
+      ? validConversation.messages.length > 0 && validConversation.messages[validConversation.messages.length - 1].isStreaming === true
+      : false
+
+    if (isStreaming || processingRef.current) {
+      const queueId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+      setMessageQueue(prev => [...prev, { id: queueId, content, queuedAt: Date.now() }])
+
+      const waitAndSend = async () => {
+        while (true) {
+          const currentConv = useChatStore.getState().conversations.find(c => c.id === validConversation?.id)
+          const stillStreaming = currentConv
+            ? currentConv.messages.length > 0 && currentConv.messages[currentConv.messages.length - 1].isStreaming === true
+            : false
+          if (!stillStreaming && !processingRef.current) break
+          await new Promise(r => setTimeout(r, 300))
+        }
+        setMessageQueue(prev => prev.filter(q => q.id !== queueId))
+        await sendMessageNow(content, attachments, agentModeId)
+      }
+
+      waitAndSend()
+      return
+    }
+
+    processingRef.current = true
+    try {
+      await sendMessageNow(content, attachments, agentModeId)
+    } finally {
+      processingRef.current = false
+    }
+  }, [validConversation, sendMessageNow])
+
+  const handleClearQueue = useCallback(() => {
+    setMessageQueue([])
+    if (validConversation?.id) {
+      window.electronAPI?.clearQueue?.(validConversation.id)
+    }
+  }, [validConversation])
+
   if (!activeProjectId || !activeProject) {
     return <EmptyState />
   }
@@ -624,9 +713,9 @@ export function ChatArea() {
           </Tooltip>
 
           {/* V2: Learning button */}
-          <Tooltip content="Tự học" side="bottom">
+          <Tooltip content="Trí Tuệ Cortex" side="bottom">
             <button
-              onClick={() => setLearningOpen(true)}
+              onClick={() => setTrainingIntelligenceOpen(true)}
               className={cn(
                 'p-1.5 rounded-lg transition-all duration-100',
                 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]',
@@ -721,6 +810,9 @@ export function ChatArea() {
       ) : (
         <EmptyState />
       )}
+
+      {/* Queue banner */}
+      <QueueBanner items={messageQueue} onClear={handleClearQueue} />
 
       {/* Input */}
       <ChatInput
