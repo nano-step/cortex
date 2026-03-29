@@ -8,9 +8,12 @@ interface MessageListProps {
   messages: Message[]
   onFeedback?: (messageId: string, type: 'thumbs_up' | 'thumbs_down') => void
   onCopy?: (messageId: string) => void
+  searchMatchIds?: string[]
+  searchCurrentId?: string | null
+  searchQuery?: string
 }
 
-export function MessageList({ messages, onFeedback, onCopy }: MessageListProps) {
+export function MessageList({ messages, onFeedback, onCopy, searchMatchIds, searchCurrentId, searchQuery }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isUserScrolledUp = useRef(false)
@@ -41,8 +44,14 @@ export function MessageList({ messages, onFeedback, onCopy }: MessageListProps) 
     }
   }, [messages])
 
+  useEffect(() => {
+    if (!searchCurrentId) return
+    const el = document.getElementById(`msg-${searchCurrentId}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchCurrentId])
+
   return (
-    <div className="relative flex-1 min-h-0">
+    <div className="relative h-full">
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
@@ -51,7 +60,15 @@ export function MessageList({ messages, onFeedback, onCopy }: MessageListProps) 
       >
         <div className="max-w-[900px] mx-auto">
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} onFeedback={onFeedback} onCopy={onCopy} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              onFeedback={onFeedback}
+              onCopy={onCopy}
+              isSearchMatch={!!searchMatchIds?.includes(message.id)}
+              isSearchCurrent={searchCurrentId === message.id}
+              searchQuery={searchQuery ?? ''}
+            />
           ))}
           <div ref={bottomRef} />
         </div>

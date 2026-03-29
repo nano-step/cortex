@@ -13,7 +13,9 @@ import {
   MoreHorizontal,
   Check,
   Pin,
-  PinOff
+  PinOff,
+  Search,
+  X
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useUIStore } from '../../stores/uiStore'
@@ -67,9 +69,17 @@ export function Sidebar() {
     ? conversations.filter((c) => c.projectId === activeProjectId)
     : []
 
+  const [convSearch, setConvSearch] = useState('')
+
+  const filteredConversations = useMemo(() => {
+    const q = convSearch.trim().toLowerCase()
+    if (!q) return projectConversations
+    return projectConversations.filter(c => c.title.toLowerCase().includes(q))
+  }, [projectConversations, convSearch])
+
   const groupedConversations = useMemo(
-    () => groupConversationsByTime(projectConversations),
-    [projectConversations]
+    () => groupConversationsByTime(filteredConversations),
+    [filteredConversations]
   )
 
   const handleNewConversation = async () => {
@@ -319,6 +329,26 @@ export function Sidebar() {
               </div>
             )}
           </div>
+
+          {/* Conversation search */}
+          {activeProjectId && projectConversations.length > 3 && (
+            <div className="px-3 pb-2">
+              <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-primary)]">
+                <Search size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                <input
+                  value={convSearch}
+                  onChange={e => setConvSearch(e.target.value)}
+                  placeholder="Tìm cuộc trò chuyện..."
+                  className="flex-1 bg-transparent outline-none text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                />
+                {convSearch && (
+                  <button onClick={() => setConvSearch('')} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Conversation List — main content area */}
           <div className="flex-1 overflow-y-auto px-2">

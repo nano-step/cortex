@@ -17,6 +17,9 @@ interface MessageBubbleProps {
   message: Message
   onFeedback?: (messageId: string, type: 'thumbs_up' | 'thumbs_down') => void
   onCopy?: (messageId: string) => void
+  isSearchMatch?: boolean
+  isSearchCurrent?: boolean
+  searchQuery?: string
 }
 
 // =====================
@@ -673,17 +676,19 @@ const MemoizedMarkdown = ({ content }: { content: string }) => {
   return rendered
 }
 
-export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProps) {
+export function MessageBubble({ message, onFeedback, onCopy, isSearchMatch, isSearchCurrent, searchQuery }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isStreamingEmpty = message.isStreaming && !message.content
   const thinkingSteps = useChatStore((s) => s.thinkingSteps.get(message.conversationId)) ?? EMPTY_STEPS
 
   return (
-    <div className="message-enter">
+    <div id={`msg-${message.id}`} className="message-enter">
       <div
         className={cn(
           'flex gap-3 py-5',
-          'max-w-[900px] mx-auto'
+          'max-w-[900px] mx-auto',
+          isSearchCurrent && 'bg-[var(--accent-primary)]/8 -mx-6 px-6 rounded-xl',
+          isSearchMatch && !isSearchCurrent && 'bg-[var(--accent-primary)]/4 -mx-6 px-6 rounded-xl'
         )}
       >
         {/* Avatar */}

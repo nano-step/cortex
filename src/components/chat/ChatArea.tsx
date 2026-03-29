@@ -4,6 +4,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSyncStore, getEstimatedTimeRemaining, formatRelativeTime, getPhaseLabel } from '../../stores/syncStore'
 import { MessageList } from './MessageList'
+import { MessageSearch } from './MessageSearch'
 import { ChatInput } from './ChatInput'
 import { EmptyState } from './EmptyState'
 import { Tooltip } from '../ui/Tooltip'
@@ -68,6 +69,11 @@ export function ChatArea() {
   const [messageQueue, setMessageQueue] = useState<QueuedItem[]>([])
   const processingRef = useRef(false)
 
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchMatchIds, setSearchMatchIds] = useState<string[]>([])
+  const [searchCurrentIndex, setSearchCurrentIndex] = useState(0)
+  const [searchQuery, setSearchQuery] = useState('')
+
   // Implicit feedback timing refs
   const lastAssistantTimestamp = useRef<number | null>(null)
   const lastAssistantId = useRef<string | null>(null)
@@ -89,6 +95,17 @@ export function ChatArea() {
       loadConversations(activeProjectId)
     }
   }, [activeProjectId, loadConversations])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        setSearchOpen(prev => !prev)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   useEffect(() => {
     let pendingUpdate: { conversationId: string; content: string } | null = null
@@ -788,11 +805,30 @@ export function ChatArea() {
       )}
 
       {/* Messages or empty */}
-      {validConversation && validConversation.messages.length > 0 ? (
-        <MessageList messages={validConversation.messages} onFeedback={handleFeedback} onCopy={handleCopy} />
-      ) : (
-        <EmptyState />
-      )}
+      <div className="relative flex-1 min-h-0">
+        <MessageSearch
+          open={searchOpen}
+          messages={validConversation?.messages ?? []}
+          onClose={() => setSearchOpen(false)}
+          onMatchChange={(ids, idx, q) => {
+            setSearchMatchIds(ids)
+            setSearchCurrentIndex(idx)
+            setSearchQuery(q)
+          }}
+        />
+        {validConversation && validConversation.messages.length > 0 ? (
+          <MessageList
+            messages={validConversation.messages}
+            onFeedback={handleFeedback}
+            onCopy={handleCopy}
+            searchMatchIds={searchMatchIds}
+            searchCurrentId={searchMatchIds[searchCurrentIndex] ?? null}
+            searchQuery={searchQuery}
+          />
+        ) : (
+          <EmptyState />
+        )}
+      </div>
 
       {/* Queue pill */}
       <QueuePill count={messageQueue.length} onClear={handleClearQueue} />
