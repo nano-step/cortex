@@ -11,32 +11,25 @@ const CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export function initCacheSchema(): void {
   const db = getDb()
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS semantic_cache (
-      id TEXT PRIMARY KEY,
-      query_hash TEXT NOT NULL,
-      query_text TEXT NOT NULL,
-      query_embedding BLOB,
-      response TEXT NOT NULL,
-      model TEXT,
-      project_id TEXT,
-      tokens_saved INTEGER DEFAULT 0,
-      hit_count INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      expires_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_cache_hash ON semantic_cache(query_hash);
-    CREATE INDEX IF NOT EXISTS idx_cache_expires ON semantic_cache(expires_at);
-    CREATE INDEX IF NOT EXISTS idx_cache_project ON semantic_cache(project_id);
-  `)
-
-  // Migration: add project_id column if it doesn't exist yet (for existing installs)
+  db.exec(`CREATE TABLE IF NOT EXISTS semantic_cache (
+    id TEXT PRIMARY KEY,
+    query_hash TEXT NOT NULL,
+    query_text TEXT NOT NULL,
+    query_embedding BLOB,
+    response TEXT NOT NULL,
+    model TEXT,
+    project_id TEXT,
+    tokens_saved INTEGER DEFAULT 0,
+    hit_count INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    expires_at INTEGER NOT NULL
+  )`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_cache_hash ON semantic_cache(query_hash)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_cache_expires ON semantic_cache(expires_at)`)
   try {
     db.exec(`ALTER TABLE semantic_cache ADD COLUMN project_id TEXT`)
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_cache_project ON semantic_cache(project_id)`)
-  } catch {
-    // Column already exists — expected on fresh installs
-  }
+  } catch (_) { _ }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_cache_project ON semantic_cache(project_id)`)
 }
 
 export async function getCachedResponse(query: string, threshold: number = 0.92): Promise<{ response: string, tokensSaved: number } | null> {

@@ -1,11 +1,10 @@
 import type { IpcMain } from 'electron'
 import { initCostSchema, getCostByProject, getDailyCosts, getCompressionStats } from '../services/skills/efficiency/cost-tracker'
-import { initCacheSchema, invalidateCache, getCacheStats } from '../services/skills/efficiency/semantic-cache'
+import { invalidateCache, getCacheStats } from '../services/skills/efficiency/semantic-cache'
 import { initSkillMetricsTable } from '../services/skills/skill-metrics'
 
 export function registerEfficiencyIPC(ipcMain: IpcMain): void {
   try { initCostSchema() } catch (err) { console.error('[Main] Cost schema init failed:', err) }
-  try { initCacheSchema() } catch (err) { console.error('[Main] Cache schema init failed:', err) }
   try { initSkillMetricsTable() } catch (err) { console.error('[Main] Skill metrics init failed:', err) }
 
   ipcMain.handle('cost:stats', (_event, projectId: string) => {

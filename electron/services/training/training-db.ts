@@ -8,60 +8,55 @@ let schemaInitialized = false
 export function initTrainingSchema(): void {
   if (schemaInitialized) return
   const db = getDb()
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS training_runs (
-      id TEXT PRIMARY KEY,
-      pipeline TEXT NOT NULL,
-      project_id TEXT,
-      trigger_type TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      metrics TEXT DEFAULT '{}',
-      duration_ms INTEGER DEFAULT 0,
-      error TEXT,
-      started_at INTEGER,
-      completed_at INTEGER,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-    CREATE INDEX IF NOT EXISTS idx_training_runs_pipeline ON training_runs(pipeline);
-    CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status);
-    CREATE INDEX IF NOT EXISTS idx_training_runs_created ON training_runs(created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS pipeline_metrics (
-      id TEXT PRIMARY KEY,
-      pipeline TEXT NOT NULL,
-      metric_name TEXT NOT NULL,
-      metric_value REAL NOT NULL,
-      project_id TEXT,
-      recorded_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-    CREATE INDEX IF NOT EXISTS idx_pipeline_metrics_lookup ON pipeline_metrics(pipeline, metric_name);
-
-    CREATE TABLE IF NOT EXISTS agent_scores (
-      id TEXT PRIMARY KEY,
-      agent_name TEXT NOT NULL,
-      project_id TEXT NOT NULL,
-      total_calls INTEGER DEFAULT 0,
-      success_count INTEGER DEFAULT 0,
-      avg_latency_ms REAL DEFAULT 0,
-      avg_satisfaction REAL DEFAULT 0,
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      UNIQUE(agent_name, project_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_agent_scores_agent ON agent_scores(agent_name);
-
-    CREATE TABLE IF NOT EXISTS cross_project_knowledge (
-      id TEXT PRIMARY KEY,
-      source_project_id TEXT NOT NULL,
-      knowledge_type TEXT NOT NULL,
-      domain TEXT,
-      content TEXT NOT NULL,
-      confidence REAL DEFAULT 0.5,
-      usage_count INTEGER DEFAULT 0,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      last_used_at INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_cross_knowledge_type ON cross_project_knowledge(knowledge_type, domain);
-  `)
+  db.exec(`CREATE TABLE IF NOT EXISTS training_runs (
+    id TEXT PRIMARY KEY,
+    pipeline TEXT NOT NULL,
+    project_id TEXT,
+    trigger_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    metrics TEXT DEFAULT '{}',
+    duration_ms INTEGER DEFAULT 0,
+    error TEXT,
+    started_at INTEGER,
+    completed_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_pipeline ON training_runs(pipeline)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_training_runs_created ON training_runs(created_at DESC)`)
+  db.exec(`CREATE TABLE IF NOT EXISTS pipeline_metrics (
+    id TEXT PRIMARY KEY,
+    pipeline TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    metric_value REAL NOT NULL,
+    project_id TEXT,
+    recorded_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  )`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_pipeline_metrics_lookup ON pipeline_metrics(pipeline, metric_name)`)
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_scores (
+    id TEXT PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    total_calls INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    avg_latency_ms REAL DEFAULT 0,
+    avg_satisfaction REAL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    UNIQUE(agent_name, project_id)
+  )`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_agent_scores_agent ON agent_scores(agent_name)`)
+  db.exec(`CREATE TABLE IF NOT EXISTS cross_project_knowledge (
+    id TEXT PRIMARY KEY,
+    source_project_id TEXT NOT NULL,
+    knowledge_type TEXT NOT NULL,
+    domain TEXT,
+    content TEXT NOT NULL,
+    confidence REAL DEFAULT 0.5,
+    usage_count INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    last_used_at INTEGER
+  )`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_cross_knowledge_type ON cross_project_knowledge(knowledge_type, domain)`)
   schemaInitialized = true
   console.log('[TrainingDB] Schema initialized')
 }
