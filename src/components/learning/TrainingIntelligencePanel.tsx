@@ -355,6 +355,12 @@ export function TrainingIntelligencePanel({ open, onClose, projectId }: Training
   }, [open, fetchProgress])
 
   useEffect(() => {
+    if (!open || !projectId) return
+    const id = setInterval(fetchScore, 30_000)
+    return () => clearInterval(id)
+  }, [open, projectId, fetchScore])
+
+  useEffect(() => {
     if (!open) return
     const unsubscribe = window.electronAPI?.onAutoscanActivity?.((activity) => {
       setAutoscanProgress(prev => {

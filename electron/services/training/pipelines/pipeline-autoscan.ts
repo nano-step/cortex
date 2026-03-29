@@ -55,6 +55,7 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
         currentBatch: 0,
         totalBatches,
         isRunning: true,
+        lastRunAt: Date.now(),
         currentProjectId: projectId
       })
 
