@@ -49,7 +49,7 @@ export function MessageList({ messages, onFeedback, onCopy }: MessageListProps) 
         className="h-full overflow-y-auto px-6"
         style={{ scrollBehavior: 'smooth' }}
       >
-        <div className="max-w-[720px] mx-auto">
+        <div className="max-w-[900px] mx-auto">
           {messages.map((message) => (
             <MessageBubble key={message.id} message={message} onFeedback={onFeedback} onCopy={onCopy} />
           ))}

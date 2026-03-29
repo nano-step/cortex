@@ -404,7 +404,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, placeholder }
           </div>
         </div>
       )}
-      <div className="max-w-[720px] mx-auto">
+      <div className="max-w-[900px] mx-auto">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2 px-1">
             {attachments.map(att => (

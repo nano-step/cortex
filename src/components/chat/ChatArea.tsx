@@ -7,7 +7,7 @@ import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { EmptyState } from './EmptyState'
 import { Tooltip } from '../ui/Tooltip'
-import { Brain, RefreshCw, ChevronDown, Cpu, FolderPlus, Network, BarChart3, Zap, X, Database, Puzzle, GraduationCap, Bot, ListOrdered, Clock } from 'lucide-react'
+import { Brain, RefreshCw, ChevronDown, Cpu, FolderPlus, Network, BarChart3, Zap, X, Database, Puzzle, GraduationCap, Bot, ListOrdered } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { AddRepoModal } from '../project/AddRepoModal'
 
@@ -17,41 +17,24 @@ interface QueuedItem {
   queuedAt: number
 }
 
-function QueueBanner({ items, onClear }: { items: QueuedItem[]; onClear: () => void }) {
-  if (items.length === 0) return null
+function QueuePill({ count, onClear }: { count: number; onClear: () => void }) {
+  if (count === 0) return null
   return (
-    <div className="px-6 pb-2">
-      <div className="max-w-[720px] mx-auto">
-        <div className={cn(
-          'flex items-center gap-2.5 px-3 py-2 rounded-xl',
-          'bg-[var(--accent-light)] border border-[var(--accent-primary)]/20',
-          'animate-in slide-in-from-bottom-2 duration-200'
-        )}>
-          <ListOrdered size={13} className="text-[var(--accent-primary)] shrink-0" />
-          <div className="flex-1 min-w-0">
-            <span className="text-[12px] font-medium text-[var(--accent-primary)]">
-              {items.length} tin nhắn đang chờ xử lý
-            </span>
-            <div className="flex gap-1.5 mt-1 flex-wrap">
-              {items.map((item, i) => (
-                <span
-                  key={item.id}
-                  className="inline-flex items-center gap-1 text-[10px] text-[var(--text-secondary)] bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-2 py-0.5 max-w-[200px]"
-                >
-                  <Clock size={9} className="shrink-0 text-[var(--text-tertiary)]" />
-                  <span className="truncate">{i + 1}. {item.content.length > 40 ? item.content.slice(0, 40) + '…' : item.content}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-          <button
-            onClick={onClear}
-            className="shrink-0 p-1 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/10 transition-all"
-            title="Huỷ hàng đợi"
-          >
-            <X size={12} />
-          </button>
-        </div>
+    <div className="flex justify-end max-w-[900px] mx-auto px-6 pb-1.5">
+      <div className={cn(
+        'inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-full text-[11px]',
+        'bg-[var(--accent-light)] border border-[var(--accent-primary)]/20',
+        'text-[var(--accent-primary)] animate-in fade-in duration-150'
+      )}>
+        <ListOrdered size={11} />
+        <span className="font-medium">{count} đang chờ</span>
+        <button
+          onClick={onClear}
+          className="ml-0.5 p-0.5 rounded-full hover:bg-[var(--accent-primary)]/15 transition-colors"
+          title="Huỷ hàng đợi"
+        >
+          <X size={9} />
+        </button>
       </div>
     </div>
   )
@@ -811,8 +794,8 @@ export function ChatArea() {
         <EmptyState />
       )}
 
-      {/* Queue banner */}
-      <QueueBanner items={messageQueue} onClear={handleClearQueue} />
+      {/* Queue pill */}
+      <QueuePill count={messageQueue.length} onClear={handleClearQueue} />
 
       {/* Input */}
       <ChatInput

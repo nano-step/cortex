@@ -683,7 +683,7 @@ export function MessageBubble({ message, onFeedback, onCopy }: MessageBubbleProp
       <div
         className={cn(
           'flex gap-3 py-5',
-          'max-w-[720px] mx-auto'
+          'max-w-[900px] mx-auto'
         )}
       >
         {/* Avatar */}
