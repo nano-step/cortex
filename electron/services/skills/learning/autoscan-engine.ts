@@ -728,7 +728,8 @@ export async function saveAcceptedPair(
 export async function runBatch(
  projectId: string,
  offset: number,
- batchSize: number
+ batchSize: number,
+ onProgress?: (accepted: number, rejected: number, scanned: number) => void
 ): Promise<AutoScanBatchResult> {
  const start = Date.now()
  let chunksScanned = 0
@@ -815,18 +816,20 @@ export async function runBatch(
      continue
     }
     setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'accepted', timestamp: Date.now() })
-    await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
-    questionCache.delete(projectId)
-    pairsAccepted++
-    logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
-   } else {
-    setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
-    logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
-    if (judgment.score >= config.nearMissThreshold && !isDuplicateQuestion(question, projectId)) {
-     await saveNearMissPair(projectId, question, chunk.id, judgment.score)
+     await saveAcceptedPair(projectId, question, answer, 'chunk', chunk.id, judgment.score)
+     questionCache.delete(projectId)
+     pairsAccepted++
+     logLearn(`[Code] Lưu pair | score=${judgment.score.toFixed(1)} | ${topic} | "${truncate(question, 60)}"`)
+     onProgress?.(pairsAccepted, pairsRejected, chunksScanned)
+    } else {
+     setActivity({ filePath: chunk.file_path, question, answer, score: judgment.score, status: 'rejected', timestamp: Date.now() })
+     logLearn(`[Code] Bỏ pair | score=${judgment.score.toFixed(1)} | "${truncate(question, 60)}"`)
+     if (judgment.score >= config.nearMissThreshold && !isDuplicateQuestion(question, projectId)) {
+      await saveNearMissPair(projectId, question, chunk.id, judgment.score)
+     }
+     pairsRejected++
+     onProgress?.(pairsAccepted, pairsRejected, chunksScanned)
     }
-    pairsRejected++
-   }
   }
  }
 

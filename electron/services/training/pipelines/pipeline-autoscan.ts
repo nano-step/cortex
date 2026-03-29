@@ -85,7 +85,16 @@ async function execute(context: PipelineContext): Promise<PipelineResult> {
 
         setAutoScanProgress({ currentBatch: batchIndex + 1 })
 
-        const batchResult = await runBatch(projectId, offset, scanConfig.batchSize)
+        const batchResult = await runBatch(
+          projectId, offset, scanConfig.batchSize,
+          (batchAcc, batchRej, batchScanned) => {
+            setAutoScanProgress({
+              pairsAccepted: totalPairsAccepted + batchAcc,
+              pairsRejected: totalPairsRejected + batchRej,
+              chunksScanned: totalChunksScanned + batchScanned
+            })
+          }
+        )
 
         totalChunksScanned += batchResult.chunksScanned
         totalPairsGenerated += batchResult.pairsGenerated
