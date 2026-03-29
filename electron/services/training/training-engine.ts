@@ -6,7 +6,7 @@ import type {
 } from './types'
 import { createAutoscanPipeline } from './pipelines/pipeline-autoscan'
 import { DEFAULT_SCHEDULER_CONFIG, ALL_PIPELINES } from './types'
-import { getCircuitStatus } from '../skills/learning/autoscan-engine'
+import { getCircuitStatus, RateLimitError } from '../skills/learning/autoscan-engine'
 import { initTrainingSchema, insertRun, startRun, completeRun, getLastRunTime, recordMetric, getRunCountByPipeline } from './training-db'
 import { startScheduler, stopScheduler, notifyPostChat, notifyEvent, notifyChatStarted, notifyChatEnded, getSchedulerStatus } from './training-scheduler'
 
@@ -181,6 +181,16 @@ async function processQueue(): Promise<void> {
       try {
         result = await pipeline.execute(context)
       } catch (err) {
+        if (err instanceof RateLimitError) {
+          console.error(`[TrainingEngine] RATE LIMIT — dừng toàn bộ training | label="${err.label}" retryAfter=${err.retryAfterMs}ms`)
+          jobQueue.length = 0
+          engineRunning = false
+          processing = false
+          currentJob = null
+          stopScheduler()
+          emitRateLimit(err)
+          return
+        }
         result = {
           pipeline: job.pipeline,
           success: false,
@@ -233,6 +243,15 @@ function emitProgress(pipeline: PipelineName, status: string, result?: PipelineR
 
 function emitStatus(): void {
   mainWindow?.webContents.send('training:status', getEngineStatus())
+}
+
+function emitRateLimit(err: RateLimitError): void {
+  mainWindow?.webContents.send('training:rate-limit', {
+    label: err.label,
+    retryAfterMs: err.retryAfterMs,
+    message: err.message,
+    timestamp: Date.now()
+  })
 }
 
 function loadConfig(): SchedulerConfig {

@@ -280,6 +280,20 @@ function sleep(ms: number): Promise<void> {
  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+export class RateLimitError extends Error {
+ readonly retryAfterMs: number
+ readonly label: string
+ constructor(label: string, retryAfterMs: number) {
+  super(`Rate limit hit on "${label}" — training stopped immediately`)
+  this.name = 'RateLimitError'
+  this.retryAfterMs = retryAfterMs
+  this.label = label
+ }
+}
+
+let lastRequestAt = 0
+const MIN_GAP_MS = 500
+
 async function callLLM(
  systemPrompt: string,
  userContent: string,
@@ -293,76 +307,72 @@ async function callLLM(
   return ''
  }
 
- // Legacy guard (backward compat, kept for in-loop checks)
  if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
   logTrain(`[Circuit breaker OPEN] Skipping LLM call | ${label ?? '?'}`)
   return ''
  }
 
- const maxRetries = config.maxRetries ?? 3
- let attempt = 0
+ const gap = Date.now() - lastRequestAt
+ if (gap < MIN_GAP_MS) await sleep(MIN_GAP_MS - gap)
 
- while (attempt <= maxRetries) {
-  const t0 = Date.now()
-  try {
-   const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-     'Content-Type': 'application/json',
-     Authorization: `Bearer ${getProxyKey()}`
-    },
-    body: JSON.stringify({
-     model: getTrainingModel(),
-     messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userContent }
-     ],
-     stream: false,
-     temperature,
-     max_tokens: maxTokens
-    })
+ lastRequestAt = Date.now()
+ const t0 = Date.now()
+
+ try {
+  const response = await fetch(`${getProxyUrl()}/v1/chat/completions`, {
+   method: 'POST',
+   headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${getProxyKey()}`
+   },
+   body: JSON.stringify({
+    model: getTrainingModel(),
+    messages: [
+     { role: 'system', content: systemPrompt },
+     { role: 'user', content: userContent }
+    ],
+    stream: false,
+    temperature,
+    max_tokens: maxTokens
    })
+  })
 
-   const elapsed = Date.now() - t0
+  const elapsed = Date.now() - t0
 
-    if (response.status === 429 || response.status === 503) {
-     consecutiveErrors++
-     recordCircuitFailure()
-     const retryAfterHeader = response.headers.get('retry-after')
-    const backoffMs = retryAfterHeader
-     ? parseInt(retryAfterHeader, 10) * 1000
-     : Math.min(1000 * Math.pow(2, attempt), 30_000)
-    logTrain(`LLM ${response.status} (attempt ${attempt + 1}/${maxRetries + 1}) | backoff ${backoffMs}ms | ${label ?? '?'}`)
-    if (attempt >= maxRetries) return ''
-    await sleep(backoffMs)
-    attempt++
-    continue
-   }
+  if (response.status === 429) {
+   const retryAfterHeader = response.headers.get('retry-after')
+   const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : 0
+   logTrain(`[RATE LIMIT] 429 trên "${label ?? '?'}" — dừng training ngay lập tức`)
+   throw new RateLimitError(label ?? '?', retryAfterMs)
+  }
 
-   if (!response.ok) {
-     consecutiveErrors++
-     recordCircuitFailure()
-     logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
-     return ''
-    }
+  if (response.status === 503) {
+   consecutiveErrors++
+   recordCircuitFailure()
+   logTrain(`LLM 503 (${elapsed}ms) | ${label ?? '?'}`)
+   return ''
+  }
 
-    consecutiveErrors = 0
-    recordCircuitSuccess()
-    const data = await response.json() as { choices: Array<{ message: { content: string } }> }
-    logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
-    return data.choices?.[0]?.message?.content || ''
-   } catch (err) {
-    consecutiveErrors++
-    recordCircuitFailure()
-    const elapsed = Date.now() - t0
-    logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${(err as Error).message}`)
-    if (attempt >= maxRetries) return ''
-    await sleep(1000 * Math.pow(2, attempt))
-    attempt++
-   }
+  if (!response.ok) {
+   consecutiveErrors++
+   recordCircuitFailure()
+   logTrain(`LLM ${response.status} (${elapsed}ms) | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+   return ''
+  }
+
+  consecutiveErrors = 0
+  recordCircuitSuccess()
+  const data = await response.json() as { choices: Array<{ message: { content: string } }> }
+  logTrain(`LLM ok ${elapsed}ms | ${label ?? '?'} | prompt="${truncate(userContent, 80)}"`)
+  return data.choices?.[0]?.message?.content || ''
+ } catch (err) {
+  if (err instanceof RateLimitError) throw err
+  consecutiveErrors++
+  recordCircuitFailure()
+  const elapsed = Date.now() - t0
+  logTrain(`LLM failed (${elapsed}ms) | ${label ?? '?'} | ${(err as Error).message}`)
+  return ''
  }
-
- return ''
 }
 
 export function resetCircuitBreaker(): void {
