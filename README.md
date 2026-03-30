@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.4.0%20Thalamus-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.5.0%20Hippocampus-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
@@ -13,8 +13,8 @@ A desktop AI assistant that deeply understands your entire codebase — not a Ch
 
 [⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](ARCHITECTURE.md) · [📦 Skill Catalog](SKILL_CATALOG.md)
 
-**What's new in v4.4.0 "Thalamus":**
-Full-Stack Activation — 80% → >60% queries now use multi-agent orchestration · Smart category-based pipeline routing · Loop auto-activation (Ralph/Ultrawork) · Proactive background agents · Training feedback loop closed · OMO infrastructure fully wired
+**What's new in v4.5.0 "Hippocampus":**
+7-tier fuzzy matching engine — Uniform indent detection + auto re-indentation · Block anchor matching · Ellipsis/dotdotdots wildcard handling · Levenshtein with bracket protection + distance-proportional threshold · Variable-length window matching · Quality gate rejects false positives · Line-range editing tool · Research-backed techniques from Aider, Cline, and Continue
 
 </div>
 
@@ -103,7 +103,7 @@ Cortex doesn't just answer from knowledge — it **acts**:
 | **Vision** | `analyze_image`, `compare_images` | FREE image analysis via OpenRouter (healer-alpha, hunter-alpha) |
 | **Artist** | `generate_image`, `edit_image` | AI image generation with 8 style presets (anime, watercolor, pixel-art...) |
 | **Web** | `perplexity_search`, `perplexity_read_url` | Real-time web search and URL reading |
-| **File System** | `read_file`, `write_file`, `edit_file`, `read_files` (batch), `grep_search`, `edit_files` (batch), `list_directory`, `move_file`, `delete_file` | Full read/write/search — chunk reading (10MB), batch parallel I/O, progressive edit fallback, unrestricted mode |
+| **File System** | `read_file`, `write_file`, `edit_file`, `edit_file_lines`, `read_files` (batch), `grep_search`, `edit_files` (batch), `list_directory`, `move_file`, `delete_file` | Full read/write/search — chunk reading (10MB), batch parallel I/O, 7-tier fuzzy matching with indent-aware replacement, line-range editing, unrestricted mode |
 
 ### Layer 4: Memory (3-Tier Persistent)
 
@@ -361,6 +361,56 @@ Check progress: Learning Dashboard → AutoScan tab (shows pairs generated, budg
 
 ---
 
+## What's New in v4.5.0 "Hippocampus"
+
+> **Hippocampus** — the brain's pattern matching center, responsible for spatial navigation, associative memory, and error correction. This release rebuilds Cortex's code editing engine with a 7-tier fuzzy matching cascade researched from Aider, Cline, and Continue — the three leading open-source AI coding tools.
+
+### 7-Tier Fuzzy Matching Engine
+
+When AI sends code that doesn't exactly match file content, Cortex now tries 7 progressively smarter strategies:
+
+| Tier | Strategy | Source | What It Handles |
+|------|----------|--------|-----------------|
+| 1 | **Uniform indent detection** | Aider | AI sends 2-space indent, file uses 4-space → detects offset, re-indents replacement |
+| 2 | **Whitespace-normalized** | Cline | Each line trimmed independently — handles mixed indent differences |
+| 3 | **Skip spurious blank line** | Aider | LLM adds blank line at start of search block → removes it, retries |
+| 4 | **Block anchor** | Cline | First/last line anchors for 3+ line blocks — skips middle validation |
+| 5 | **Ellipsis/dotdotdots** | Aider | LLM writes `...` meaning "keep unchanged" → splits, matches each piece |
+| 6 | **Levenshtein + bracket protection** | Continue | Fuzzy per-line matching with distance-proportional threshold; structural lines (`}`, `});`) require exact match |
+| 7 | **Variable-length window** | Aider | Tries ±10% of expected block size for when AI adds/removes lines |
+
+### Indent-Aware Replacement
+
+When Tier 1 (uniform indent) matches, Cortex **automatically re-indents** the replacement text:
+
+```
+File has:     "    if x:"     (4-space indent)
+AI sends:     "  if x:"       (2-space indent)
+Replacement:  "  if y:"       (2-space indent)
+                ↓ auto re-indent
+Written:      "    if y:"     (4-space indent ✓)
+```
+
+### Quality Gate
+
+Fuzzy matches that would remove >50% of matched lines (likely false positive) are rejected instead of silently corrupting code.
+
+### Better Error Feedback
+
+When all 7 tiers fail, `findSimilarBlock()` searches for the closest matching region with ±3 lines of context — not just first-line keyword matching.
+
+### Line-Range Editing Tool
+
+New `cortex_edit_file_lines` tool — edit by line range (1-indexed, inclusive) without any string matching. Use `cortex_read_file` with `offset+limit` to see exact line numbers first.
+
+### Filesystem Tools: 9 → 11
+
+- `cortex_edit_file` — upgraded with 7-tier fuzzy matching + indent-aware replacement
+- `cortex_edit_file_lines` — **NEW** — edit by line range
+- Progressive edit fallback: exact → uniform-indent → whitespace-normalized → skip-blank → block-anchor → ellipsis → levenshtein → variable-window
+
+---
+
 ## What's New in v4.4.0 "Thalamus"
 
 > **Thalamus** — the brain's relay station, routing signals to exactly the right region for processing. This release does the same for Cortex: every query is now routed to the right infrastructure layer automatically.
@@ -464,7 +514,7 @@ Distilled from Claude Code, Cursor v1–v2, Devin AI, Windsurf Cascade:
 - `cortex_delete_file` — sandbox-safe deletion
 - Upgraded `cortex_read_file`: 10MB limit, `offset`+`limit` chunk reading
 - Upgraded `cortex_list_directory`: `recursive`, `depth`, `extensions` filter
-- Progressive edit fallback: exact → whitespace-normalized → nearest-line hint
+- Progressive edit fallback: exact → whitespace-normalized → nearest-line hint (upgraded to 7-tier in v4.5.0)
 
 ### Unrestricted Mode
 New setting: `filesystem_unrestricted_mode` — AI can read/write any file on the machine.
