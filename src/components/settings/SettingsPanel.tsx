@@ -14,7 +14,10 @@ import {
   ChevronRight,
   Moon,
   Sun,
-  Palette
+  Palette,
+  FolderOpen,
+  Shield,
+  Trash2
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
@@ -45,6 +48,9 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
 
   // Git Config
   const [cloneDepth, setCloneDepth] = useState(1)
+
+  const [fsAccessMode, setFsAccessMode] = useState<'restricted' | 'allowlist' | 'unrestricted'>('restricted')
+  const [fsAllowlist, setFsAllowlist] = useState<string[]>([])
 
   // Advanced collapsed
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -138,6 +144,13 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       try {
         const autoRot = await window.electronAPI.getAutoRotation()
         setAutoRotationState(autoRot)
+      } catch {}
+
+      try {
+        const mode = await window.electronAPI.getFsAccessMode()
+        if (mode) setFsAccessMode(mode as 'restricted' | 'allowlist' | 'unrestricted')
+        const list = await window.electronAPI.getFsAllowlist()
+        if (list) setFsAllowlist(list)
       } catch {}
     }
     load()
@@ -261,6 +274,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         await window.electronAPI.setOpenRouterApiKey(openrouterApiKey)
       }
       await window.electronAPI.setGitHubModelsEmbeddingEnabled(githubModelsEmbedding)
+      await window.electronAPI.setFsAccessMode(fsAccessMode)
       setSaveStatus('success')
       setTimeout(() => setSaveStatus('idle'), 3000)
     } catch (err) {
@@ -271,7 +285,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     } finally {
       setSaving(false)
     }
-  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, comfyuiApiKey, openrouterApiKey, githubModelsEmbedding])
+  }, [proxyUrl, proxyKey, maxTokens, contextMessages, cloneDepth, autoRotation, githubToken, qdrantUrl, qdrantApiKey, jinaApiKey, voyageApiKey, selectedVoyageModel, huggingfaceToken, comfyuiApiKey, openrouterApiKey, githubModelsEmbedding, fsAccessMode])
 
   if (!open) return null
 
@@ -816,6 +830,89 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
                 <span>Full</span>
                 <span>100</span>
+              </div>
+            </div>
+           </section>
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Shield size={16} className="text-[var(--accent-primary)]" />
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)] uppercase tracking-wider">
+                Filesystem Access
+              </h3>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[12px] text-[var(--text-secondary)] mb-2">
+                  Access Mode
+                </label>
+                <div className="space-y-1.5">
+                  {([
+                    { value: 'restricted' as const, label: 'Restricted', desc: 'Project repos only. Ask for absolute paths.' },
+                    { value: 'allowlist' as const, label: 'Allowlist', desc: 'Repos + allowlisted folders. Ask for others.' },
+                    { value: 'unrestricted' as const, label: 'Unrestricted', desc: 'All paths (except system). No prompts.' },
+                  ] as const).map((opt) => (
+                    <label key={opt.value} className={cn(
+                      'flex items-start gap-2.5 p-2 rounded-lg cursor-pointer border transition-all',
+                      fsAccessMode === opt.value
+                        ? 'border-[var(--accent-primary)] bg-[var(--accent-light)]'
+                        : 'border-transparent hover:bg-[var(--bg-secondary)]'
+                    )}>
+                      <input
+                        type="radio"
+                        name="fsAccessMode"
+                        value={opt.value}
+                        checked={fsAccessMode === opt.value}
+                        onChange={() => setFsAccessMode(opt.value)}
+                        className="mt-0.5 accent-[var(--accent-primary)]"
+                      />
+                      <div>
+                        <span className="text-[12px] font-medium text-[var(--text-primary)]">{opt.label}</span>
+                        <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{opt.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[12px] text-[var(--text-secondary)] mb-2">
+                  Allowed Folders ({fsAllowlist.length})
+                </label>
+                {fsAllowlist.length > 0 && (
+                  <div className="space-y-1 mb-2">
+                    {fsAllowlist.map((p) => (
+                      <div key={p} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-[var(--bg-secondary)] group">
+                        <FolderOpen size={13} className="text-[var(--text-tertiary)] shrink-0" />
+                        <span className="text-[11px] text-[var(--text-primary)] truncate flex-1 font-mono">{p}</span>
+                        <button
+                          onClick={async () => {
+                            await window.electronAPI.removeFsAllowlistPath(p)
+                            setFsAllowlist(fsAllowlist.filter((x) => x !== p))
+                          }}
+                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 text-[var(--text-tertiary)] hover:text-[var(--status-error-text)] transition-all"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    const folder = await window.electronAPI.openFolderDialog()
+                    if (folder && !fsAllowlist.includes(folder)) {
+                      await window.electronAPI.addFsAllowlistPath(folder)
+                      setFsAllowlist([...fsAllowlist, folder])
+                    }
+                  }}
+                >
+                  <FolderOpen size={13} className="mr-1.5" />
+                  Add Folder
+                </Button>
               </div>
             </div>
           </section>

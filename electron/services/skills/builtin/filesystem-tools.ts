@@ -12,11 +12,12 @@
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync, renameSync, unlinkSync, rmdirSync } from 'fs'
 import { readFile as readFileAsync } from 'fs/promises'
-import { resolve, dirname, relative, extname, isAbsolute } from 'path'
+import { resolve, join, dirname, relative, extname, isAbsolute } from 'path'
+import { homedir } from 'os'
 import type { MCPToolDefinition } from '../mcp/mcp-manager'
 import { getDb, repoQueries } from '../../db'
-import { getSetting } from '../../settings-service'
 import { convertDocument, isDocumentFile } from '../../document-converter'
+import { checkAbsolutePathAccess, getAccessMode, isProtectedPath } from '../../path-access-policy'
 
 // =====================
 // Tool Definitions
@@ -27,13 +28,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_read_file',
-      description: 'Read the contents of a file. Supports offset+limit for chunk reading of large files (up to 10MB). Path is relative to the project repository root.',
+      description: 'Read the contents of a file. Supports offset+limit for chunk reading of large files (up to 10MB). Accepts relative paths (resolved to repo root) or absolute paths including ~/. Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'File path relative to the repository root (e.g., "src/index.ts", "package.json")'
+            description: 'File path: relative to repo root (e.g., "src/index.ts") or absolute (e.g., "~/Documents/notes.md", "/tmp/output.txt")'
           },
           offset: {
             type: 'number',
@@ -52,13 +53,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_write_file',
-      description: 'Write content to a file at the given path. Creates parent directories if they do not exist. Path is relative to the project repository root.',
+      description: 'Write content to a file at the given path. Creates parent directories if they do not exist. Accepts relative paths (resolved to repo root) or absolute paths including ~/. Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'File path relative to the repository root (e.g., "src/new-file.ts")'
+            description: 'File path: relative to repo root (e.g., "src/new-file.ts") or absolute (e.g., "~/Documents/notes.md", "/Users/me/output.txt")'
           },
           content: {
             type: 'string',
@@ -73,13 +74,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_edit_file',
-      description: 'Edit a file by replacing all occurrences of old_string with new_string. Path is relative to the project repository root. Returns the number of replacements made.',
+      description: 'Edit a file by replacing all occurrences of old_string with new_string. Returns the number of replacements made. Accepts relative or absolute paths (including ~/). Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'File path relative to the repository root'
+            description: 'File path: relative to repo root or absolute (e.g., "~/Documents/file.md")'
           },
           old_string: {
             type: 'string',
@@ -98,13 +99,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_list_directory',
-      description: 'List the contents of a directory. Supports recursive traversal with depth control and extension filtering. Path is relative to the project repository root.',
+      description: 'List the contents of a directory. Supports recursive traversal with depth control and extension filtering. Accepts relative or absolute paths (including ~/). Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'Directory path relative to the repository root (e.g., "src", "src/components"). Defaults to root.'
+            description: 'Directory path: relative to repo root (e.g., "src") or absolute (e.g., "~/Documents"). Defaults to repo root.'
           },
           recursive: {
             type: 'boolean',
@@ -128,14 +129,14 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_read_files',
-      description: 'Read multiple files in a single call. More efficient than calling cortex_read_file repeatedly. Supports offset and limit for large files. Returns a map of path to content.',
+      description: 'Read multiple files in a single call. More efficient than calling cortex_read_file repeatedly. Supports offset and limit for large files. Returns a map of path to content. Accepts relative or absolute paths (including ~/).',
       parameters: {
         type: 'object',
         properties: {
           paths: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of file paths relative to the repository root. Maximum 10 files per call.'
+            description: 'Array of file paths (relative to repo root or absolute). Maximum 10 files per call.'
           },
           offset: {
             type: 'number',
@@ -154,7 +155,7 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_grep_search',
-      description: 'Search for a text pattern across multiple files in the project. Returns matching lines with file paths and line numbers. Supports regex patterns.',
+      description: 'Search for a text pattern across multiple files. Returns matching lines with file paths and line numbers. Supports regex patterns. Accepts relative or absolute directory paths (including ~/).',
       parameters: {
         type: 'object',
         properties: {
@@ -164,7 +165,7 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
           },
           directory: {
             type: 'string',
-            description: 'Directory to search in, relative to repository root. Defaults to root.'
+            description: 'Directory to search in: relative to repo root or absolute (e.g., "~/projects"). Defaults to repo root.'
           },
           extensions: {
             type: 'array',
@@ -188,7 +189,7 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_edit_files',
-      description: 'Apply multiple search-and-replace edits across multiple files in a single call. More efficient than calling cortex_edit_file repeatedly. All edits are applied atomically per file.',
+      description: 'Apply multiple search-and-replace edits across multiple files in a single call. More efficient than calling cortex_edit_file repeatedly. All edits are applied atomically per file. Accepts relative or absolute paths (including ~/).',
       parameters: {
         type: 'object',
         properties: {
@@ -198,7 +199,7 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
             items: {
               type: 'object',
               properties: {
-                path: { type: 'string', description: 'File path relative to repository root.' },
+                path: { type: 'string', description: 'File path: relative to repo root or absolute (including ~/).' },
                 old_string: { type: 'string', description: 'Exact text to find.' },
                 new_string: { type: 'string', description: 'Text to replace with.' }
               },
@@ -214,17 +215,17 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_move_file',
-      description: 'Move or rename a file or directory within the project repository. Both source and destination must be within project boundaries.',
+      description: 'Move or rename a file or directory. Accepts relative or absolute paths (including ~/). Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           source: {
             type: 'string',
-            description: 'Source path relative to repository root.'
+            description: 'Source path: relative to repo root or absolute (including ~/).'
           },
           destination: {
             type: 'string',
-            description: 'Destination path relative to repository root.'
+            description: 'Destination path: relative to repo root or absolute (including ~/).'
           }
         },
         required: ['source', 'destination']
@@ -235,13 +236,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_delete_file',
-      description: 'Delete a file or empty directory from the project repository. Use with caution — this is irreversible unless the project uses git.',
+      description: 'Delete a file or empty directory. Use with caution — this is irreversible unless the project uses git. Accepts relative or absolute paths (including ~/). Absolute paths outside repo may require user approval.',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'Path to the file or empty directory to delete, relative to repository root.'
+            description: 'Path to delete: relative to repo root or absolute (including ~/).'
           }
         },
         required: ['path']
@@ -252,13 +253,13 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
     type: 'function',
     function: {
       name: 'cortex_read_document',
-      description: 'Read and convert a document file (PDF, DOCX, XLSX, CSV, HTML) to readable markdown text. Use this instead of cortex_read_file for non-code documents. Returns extracted text with metadata (page count, sheet names, title, author).',
+      description: 'Read and convert a document file (PDF, DOCX, XLSX, CSV, HTML) to readable markdown text. Use this instead of cortex_read_file for non-code documents. Returns extracted text with metadata. Accepts relative or absolute paths (including ~/).',
       parameters: {
         type: 'object',
         properties: {
           path: {
             type: 'string',
-            description: 'Path to the document file relative to the repository root. Supports: .pdf, .docx, .xlsx, .xls, .csv, .html, .htm'
+            description: 'Path to document: relative to repo root or absolute (e.g., "~/Documents/report.pdf"). Supports: .pdf, .docx, .xlsx, .xls, .csv, .html, .htm'
           }
         },
         required: ['path']
@@ -286,8 +287,11 @@ const PROTECTED_PATHS = [
   '/var', '/Library/LaunchDaemons', '/Library/LaunchAgents'
 ]
 
-function isUnrestrictedMode(): boolean {
-  return getSetting('filesystem_unrestricted_mode') === 'true'
+function expandTilde(p: string): string {
+  if (p === '~' || p.startsWith('~/')) {
+    return join(homedir(), p.slice(1))
+  }
+  return p
 }
 
 function resolveSafePath(repoPaths: string[], relativePath: string): string {
@@ -295,24 +299,33 @@ function resolveSafePath(repoPaths: string[], relativePath: string): string {
     throw new Error('Path cannot be empty')
   }
 
-  const normalized = relativePath.replace(/\\/g, '/')
+  const normalized = expandTilde(relativePath.replace(/\\/g, '/'))
 
-  if (isUnrestrictedMode()) {
-    if (isAbsolute(normalized)) {
-      const resolved = resolve(normalized)
-      for (const blocked of PROTECTED_PATHS) {
-        if (resolved.startsWith(blocked)) {
-          throw new Error(`Blocked: "${relativePath}" is in a protected system directory`)
-        }
-      }
-      if (resolved.includes('/node_modules/') || resolved.endsWith('/node_modules')) {
-        throw new Error('Blocked: cannot write to node_modules')
-      }
-      return resolved
+  if (isAbsolute(normalized)) {
+    const resolved = resolve(normalized)
+
+    if (isProtectedPath(resolved)) {
+      throw new Error(`Blocked: "${relativePath}" is in a protected system directory`)
     }
-    if (repoPaths.length > 0) {
-      return resolve(repoPaths[0], normalized)
+
+    const check = checkAbsolutePathAccess(resolved, repoPaths)
+    if (check.allowed) return resolved
+
+    if (check.reason === 'protected') {
+      throw new Error(`Blocked: "${relativePath}" is in a protected system directory`)
     }
+
+    const err = new Error(
+      `PATH_NEEDS_CONFIRMATION:${resolved}` +
+      `|Path "${relativePath}" requires permission. Add to allowlist in Settings > Filesystem Access, or approve one-time access.`
+    )
+    err.name = 'PathConfirmationError'
+    throw err
+  }
+
+  const mode = getAccessMode()
+  if (mode === 'unrestricted' && repoPaths.length > 0) {
+    return resolve(repoPaths[0], normalized)
   }
 
   for (const repoRoot of repoPaths) {
@@ -325,7 +338,7 @@ function resolveSafePath(repoPaths: string[], relativePath: string): string {
 
   throw new Error(
     `Path "${relativePath}" is outside all project repositories. ` +
-    `Allowed roots: ${repoPaths.join(', ')}. Enable unrestricted mode in settings to access files outside project.`
+    `Allowed roots: ${repoPaths.join(', ')}. Add folders to allowlist in Settings > Filesystem Access.`
   )
 }
 

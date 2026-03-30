@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFileDialog: () => ipcRenderer.invoke('dialog:openFiles'),
   openFilesFromPaths: (paths: string[]) => ipcRenderer.invoke('dialog:openFilesFromPaths', paths),
 
+  getFsAccessMode: () => ipcRenderer.invoke('fs-policy:getAccessMode') as Promise<string>,
+  setFsAccessMode: (mode: string) => ipcRenderer.invoke('fs-policy:setAccessMode', mode) as Promise<boolean>,
+  getFsAllowlist: () => ipcRenderer.invoke('fs-policy:getAllowlist') as Promise<string[]>,
+  addFsAllowlistPath: (path: string) => ipcRenderer.invoke('fs-policy:addToAllowlist', path) as Promise<boolean>,
+  removeFsAllowlistPath: (path: string) => ipcRenderer.invoke('fs-policy:removeFromAllowlist', path) as Promise<boolean>,
+
   // Project CRUD
   createProject: (name: string, brainName: string) =>
     ipcRenderer.invoke('project:create', name, brainName),

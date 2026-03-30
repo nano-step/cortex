@@ -18,6 +18,7 @@ import { getHuggingFaceToken, setHuggingFaceToken } from '../services/skills/bui
 import { getOpenRouterApiKey, setOpenRouterApiKey, getOpenRouterEnabled, setOpenRouterEnabled, getFreeModels, testOpenRouterConnection } from '../services/skills/efficiency/openrouter-fallback'
 import { getPerplexitySession, isPerplexityLoggedIn, executePerplexityTool } from '../services/skills/builtin/perplexity-tools'
 import { getGitHubPAT, setGitHubPAT } from '../services/settings-service'
+import { getAccessMode, setAccessMode, getPathAllowlist, addToAllowlist, removeFromAllowlist } from '../services/path-access-policy'
 
 export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | null): void {
   ipcMain.handle('settings:getProxyConfig', () => getProxyConfig())
@@ -180,4 +181,19 @@ export function registerSettingsIPC(ipcMain: IpcMain, getMainWindow: () => Brows
   ipcMain.handle('openrouter:setApiKey', (_event, key: string) => { setOpenRouterApiKey(key); return true })
   ipcMain.handle('openrouter:setEnabled', (_event, enabled: boolean) => { setOpenRouterEnabled(enabled); return true })
   ipcMain.handle('openrouter:test', async () => testOpenRouterConnection())
+
+  ipcMain.handle('fs-policy:getAccessMode', () => getAccessMode())
+  ipcMain.handle('fs-policy:setAccessMode', (_event, mode: string) => {
+    setAccessMode(mode as 'restricted' | 'allowlist' | 'unrestricted')
+    return true
+  })
+  ipcMain.handle('fs-policy:getAllowlist', () => getPathAllowlist())
+  ipcMain.handle('fs-policy:addToAllowlist', (_event, path: string) => {
+    addToAllowlist(path)
+    return true
+  })
+  ipcMain.handle('fs-policy:removeFromAllowlist', (_event, path: string) => {
+    removeFromAllowlist(path)
+    return true
+  })
 }

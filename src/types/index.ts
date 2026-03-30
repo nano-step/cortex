@@ -327,6 +327,12 @@ declare global {
       openFileDialog: () => Promise<ChatAttachment[]>
       openFilesFromPaths: (paths: string[]) => Promise<ChatAttachment[]>
 
+      getFsAccessMode: () => Promise<string>
+      setFsAccessMode: (mode: string) => Promise<boolean>
+      getFsAllowlist: () => Promise<string[]>
+      addFsAllowlistPath: (path: string) => Promise<boolean>
+      removeFsAllowlistPath: (path: string) => Promise<boolean>
+
       // Project CRUD
       createProject: (name: string, brainName: string) => Promise<any>
       getAllProjects: () => Promise<any[]>
