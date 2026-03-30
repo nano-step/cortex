@@ -1620,32 +1620,38 @@ Return ONLY the enhanced prompt, nothing else.`
               : await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
 
             if (toolResult.isError && toolResult.content.includes('PATH_NEEDS_CONFIRMATION:')) {
-              const confirmMatch = toolResult.content.match(/PATH_NEEDS_CONFIRMATION:([^|]+)\|(.+)/)
+              const confirmMatch = toolResult.content.match(/PATH_NEEDS_CONFIRMATION:([^|]+)\|/)
               if (confirmMatch && mainWindow) {
                 const requestedPath = confirmMatch[1]
-                const humanMessage = confirmMatch[2]
                 console.log(`[Chat] Path confirmation needed: ${requestedPath}`)
 
                 const { response } = await dialog.showMessageBox(mainWindow, {
                   type: 'question',
                   title: 'File Access Permission',
                   message: `"${toolCall.function.name}" requests access to:`,
-                  detail: `${requestedPath}\n\n${humanMessage}`,
+                  detail: requestedPath,
                   buttons: ['Reject', 'Allow Once', 'Allow & Add to Allowlist'],
-                  defaultId: 0,
+                  defaultId: 1,
                   cancelId: 0,
                 })
 
                 if (response === 0) {
-                  toolResult = { content: `User rejected access to path: ${requestedPath}`, isError: true }
+                  toolResult = { content: `User rejected file access. Do not retry this path.`, isError: true }
                 } else {
                   if (response === 2) {
                     const dirToAllow = dirname(requestedPath)
                     addPathToAllowlist(dirToAllow)
                     console.log(`[Chat] Added directory to allowlist: ${dirToAllow}`)
                   }
-                  toolResult = await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
+                  const retryResult = await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
+                  if (retryResult.isError && retryResult.content.includes('PATH_NEEDS_CONFIRMATION:')) {
+                    toolResult = { content: `Permission was granted but the file operation failed. The path may need to be added to the allowlist in Settings > Filesystem Access.`, isError: true }
+                  } else {
+                    toolResult = retryResult
+                  }
                 }
+              } else {
+                toolResult = { content: toolResult.content.replace(/PATH_NEEDS_CONFIRMATION:[^|]+\|/g, ''), isError: true }
               }
             }
 
