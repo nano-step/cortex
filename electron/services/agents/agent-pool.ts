@@ -52,7 +52,9 @@ function resolveModel(tier: ModelTier, override?: string): string {
     return ready.sort((a, b) => b.tier - a.tier)[0].id
   }
 
-  return HARDCODED_FALLBACKS[tier]
+  const hardcoded = HARDCODED_FALLBACKS[tier]
+  console.warn(`[AgentPool] No ready models found for tier '${tier}', using hardcoded fallback: ${hardcoded}`)
+  return hardcoded
 }
 
 function nextTierAfter(tier: ModelTier): ModelTier | null {
