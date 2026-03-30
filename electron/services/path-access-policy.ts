@@ -88,7 +88,7 @@ export function checkAbsolutePathAccess(absolutePath: string, repoPaths: string[
     return { allowed: true, reason: 'unrestricted', path: resolved }
   }
 
-  if (mode === 'allowlist' && isInAllowlist(resolved)) {
+  if (isInAllowlist(resolved)) {
     return { allowed: true, reason: 'in_allowlist', path: resolved }
   }
 

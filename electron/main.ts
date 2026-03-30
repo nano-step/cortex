@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell, ipcMain, dialog, nativeImage } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { getDb, closeDb, projectQueries, repoQueries, repoTreeQueries, conversationQueries, messageQueries, chunkQueries } from './services/db'
 import { indexLocalRepository, searchChunks, searchChunksHybrid, getProjectStats } from './services/brain-engine'
@@ -1640,8 +1640,9 @@ Return ONLY the enhanced prompt, nothing else.`
                   toolResult = { content: `User rejected access to path: ${requestedPath}`, isError: true }
                 } else {
                   if (response === 2) {
-                    addPathToAllowlist(requestedPath)
-                    console.log(`[Chat] Added to allowlist: ${requestedPath}`)
+                    const dirToAllow = dirname(requestedPath)
+                    addPathToAllowlist(dirToAllow)
+                    console.log(`[Chat] Added directory to allowlist: ${dirToAllow}`)
                   }
                   toolResult = await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
                 }
