@@ -1,4 +1,5 @@
 import type { HookDefinition, HookTrigger, HookPriority, HookStats } from './types'
+import { isHookDisabled } from '../plugin-config'
 
 const PRIORITY_ORDER: Record<HookPriority, number> = {
   critical: 0,
@@ -31,6 +32,7 @@ export function getHooksByTrigger(trigger: HookTrigger): HookDefinition[] {
   const matched: HookDefinition[] = []
   for (const hook of hooks.values()) {
     if (!hook.enabled) continue
+    if (isHookDisabled(hook.name)) continue
     const triggers = Array.isArray(hook.trigger) ? hook.trigger : [hook.trigger]
     if (triggers.includes(trigger)) {
       matched.push(hook)

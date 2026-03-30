@@ -14,6 +14,7 @@ import { thinkingStepEmitterHook } from './implementations/thinking-step-emitter
 import { memorySaverHook } from './implementations/memory-saver'
 import { cacheCheckHook } from './implementations/cache-check'
 import { auditLoggerHook } from './implementations/audit-logger'
+import { sessionStartHook, sessionEndHook, sessionTrackingHook } from './implementations/session-lifecycle'
 
 export function registerDefaultHooks(): void {
   registerHook(errorRecoveryHook)
@@ -26,4 +27,7 @@ export function registerDefaultHooks(): void {
   registerHook(memorySaverHook)
   registerHook(cacheCheckHook)
   registerHook(auditLoggerHook)
+  registerHook(sessionStartHook)
+  registerHook(sessionEndHook)
+  registerHook(sessionTrackingHook)
 }

@@ -8,6 +8,7 @@ import { loadAndRegisterAllAgents } from './services/agents/agent-loader'
 import { orchestrate } from './services/agents/agent-orchestrator'
 import { initNanoBrain, getNanoBrainStatus, queryNanoBrain, listCollections, triggerEmbedding } from './services/nano-brain-service'
 import { randomUUID } from 'crypto'
+import { addToAllowlist as addPathToAllowlist } from './services/path-access-policy'
 import { buildPrompt, streamChatCompletion, fetchAvailableModels, getActiveModel, getAvailableModels, setActiveModel, setMainWindow, getAutoRotation, setAutoRotation, clearAuthFailedModels, refreshModelsWithCheck, type ChatMode, type ChatMessage, type ProjectContext } from './services/llm-client'
 import { cloneRepository, checkRepoAccess, storeGitHubToken, getGitHubToken, listBranches, getCurrentBranch, listOrgRepos } from './services/git-service'
 import type { OrgRepo } from './services/git-service'
@@ -204,8 +205,32 @@ app.whenReady().then(() => {
 
   preloadEmbeddingModel()
 
+  loadPluginConfig(process.cwd())
+
+  const pluginCfg = getPluginConfig()
+  if (pluginCfg.background) {
+    configureConcurrency({
+      maxGlobal: pluginCfg.background.defaultConcurrency,
+      maxPerProvider: pluginCfg.background.providerConcurrency,
+      maxPerCategory: pluginCfg.background.modelConcurrency,
+      taskTimeout: pluginCfg.background.staleTimeoutMs
+    })
+  }
+
+  setInterval(() => {
+    const stale = detectStaleTasks()
+    if (stale.length > 0) {
+      console.warn(`[Background] Detected ${stale.length} stale task(s), removed from queue`)
+    }
+    cleanupCompleted(300_000)
+  }, 60_000)
+
   registerDefaultHooks()
   registerDefaultCapabilities()
+
+  runHooks('on:session:start', { projectId: '', metadata: { appVersion: app.getVersion() } }).catch(
+    (err) => console.warn('[Hooks] on:session:start failed (non-fatal):', err)
+  )
 
   onTaskEvent((event) => {
     mainWindow?.webContents.send('background:taskEvent', { type: event.type, task: event.task })
@@ -1563,6 +1588,12 @@ Return ONLY the enhanced prompt, nothing else.`
 
           const executeOneTool = async (toolCall: typeof streamResult.toolCalls[0]) => {
             const toolStart = Date.now()
+            runHooks('on:tool:call', {
+              projectId,
+              conversationId,
+              query,
+              metadata: { toolName: toolCall.function.name, toolArgs: toolCall.function.arguments }
+            }).catch((err) => console.warn('[Hooks] on:tool:call failed (non-fatal):', err))
             const isPerplexity = toolCall.function.name.startsWith('cortex_perplexity_')
             const isProjectTool = /^cortex_(git_|grep_|project_|search_config)/.test(toolCall.function.name)
             const isVisionTool = /^cortex_(analyze_image|compare_images)/.test(toolCall.function.name)
@@ -1570,7 +1601,7 @@ Return ONLY the enhanced prompt, nothing else.`
             const isCodeAdvisor = /^cortex_(code_advisor|find_similar_code|suggest_fix|explain_code_pattern)/.test(toolCall.function.name)
             const isBuiltinFs = toolCall.function.name.startsWith('cortex_') && !isPerplexity && !isProjectTool && !isVisionTool && !isArtistTool && !isCodeAdvisor
 
-            const toolResult = isPerplexity
+            let toolResult = isPerplexity
               ? await executePerplexityTool(toolCall.function.name, toolCall.function.arguments)
               : isVisionTool
               ? await executeVisionTool(toolCall.function.name, toolCall.function.arguments)
@@ -1583,6 +1614,35 @@ Return ONLY the enhanced prompt, nothing else.`
               : isBuiltinFs
               ? await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
               : await executeMCPTool(toolCall.function.name, toolCall.function.arguments)
+
+            if (toolResult.isError && toolResult.content.includes('PATH_NEEDS_CONFIRMATION:')) {
+              const confirmMatch = toolResult.content.match(/PATH_NEEDS_CONFIRMATION:([^|]+)\|(.+)/)
+              if (confirmMatch && mainWindow) {
+                const requestedPath = confirmMatch[1]
+                const humanMessage = confirmMatch[2]
+                console.log(`[Chat] Path confirmation needed: ${requestedPath}`)
+
+                const { response } = await dialog.showMessageBox(mainWindow, {
+                  type: 'question',
+                  title: 'File Access Permission',
+                  message: `"${toolCall.function.name}" requests access to:`,
+                  detail: `${requestedPath}\n\n${humanMessage}`,
+                  buttons: ['Reject', 'Allow Once', 'Allow & Add to Allowlist'],
+                  defaultId: 0,
+                  cancelId: 0,
+                })
+
+                if (response === 0) {
+                  toolResult = { content: `User rejected access to path: ${requestedPath}`, isError: true }
+                } else {
+                  if (response === 2) {
+                    addPathToAllowlist(requestedPath)
+                    console.log(`[Chat] Added to allowlist: ${requestedPath}`)
+                  }
+                  toolResult = await executeBuiltinTool(toolCall.function.name, toolCall.function.arguments, projectId)
+                }
+              }
+            }
 
             const toolLatency = Date.now() - toolStart
             recordSkillCall(toolCall.function.name, !toolResult.isError, toolLatency)

@@ -16,6 +16,7 @@ import type {
 } from './types'
 import { getProxyUrl, getProxyKey } from '../settings-service'
 import { sanitizeTemperature, getAvailableModels, fetchAvailableModels } from '../llm-client'
+import { getAgentOverride } from '../plugin-config'
 
 // =====================
 // Model Tier Mapping (dynamic — uses actual proxy models)
@@ -242,7 +243,8 @@ async function executeAgent(task: AgentTask, defaultTimeoutMs: number): Promise<
   const retryErrors: string[] = []
 
   let currentTier = task.agent.config.modelTier
-  let model = resolveModel(currentTier, task.agent.config.modelOverride)
+  const configOverride = getAgentOverride(task.agent.role)?.model
+  let model = resolveModel(currentTier, configOverride ?? task.agent.config.modelOverride)
 
   console.log(`[AgentPool] Starting agent '${task.agent.role}' (model: ${model}, timeout: ${timeoutMs}ms)`)
 

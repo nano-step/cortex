@@ -1,0 +1,16 @@
+{
+  "agents": {
+  },
+  "categories": {
+  },
+  "disabled_hooks": [],
+  "background": {
+    "defaultConcurrency": 5,
+    "staleTimeoutMs": 600000
+  },
+  "experimental": {
+    "aggressive_truncation": false,
+    "auto_resume": false,
+    "preemptive_compaction": false
+  }
+}
