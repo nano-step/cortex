@@ -179,11 +179,14 @@ const INTENT_KEYWORDS: Record<SkillCategory, string[]> = {
 
 /** Additional patterns that detect tool-needing queries missed by keywords */
 const TOOL_NEED_PATTERNS = [
-  /https?:\/\//i,                                          // URL present
-  /bao nhiêu.*(người|thành viên|member|dev)/i,             // Vietnamese team size
-  /how many.*(people|members|devs|contributors)/i,         // English team size
-  /\b(config|env|setting|variable)\b.*\b(name|value|key)\b/i, // Config search
-  /\b(git|commit|branch|merge|deploy|release)\b/i,         // Git operations
+  /https?:\/\//i,
+  /bao nhiêu.*(người|thành viên|member|dev)/i,
+  /how many.*(people|members|devs|contributors)/i,
+  /\b(config|env|setting|variable)\b.*\b(name|value|key)\b/i,
+  /\b(git|commit|branch|merge|deploy|release)\b/i,
+  /(ghi|lưu|save|write|tạo file|create file|viết vào|output to).*(file|folder|path|~\/|\/Users|\/tmp|\.md|\.txt|\.json)/i,
+  /\b(write_file|read_file|edit_file|delete_file|move_file)\b/i,
+  /~\//,
 ]
 
 export function classifyIntentKeywordFallback(query: string): SmartIntentResult {

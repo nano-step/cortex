@@ -1466,7 +1466,9 @@ Return ONLY the enhanced prompt, nothing else.`
 
         const hasExternalUrl = /https?:\/\/(github\.com|.*\.atlassian\.net|.*jira.*|.*confluence.*)/i.test(query)
         const needsToolExecution = smartIntent?.needsToolUse ||
-          /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|phân tích.*ảnh|analyze.*image)/i.test(query)
+          /(vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|phân tích.*ảnh|analyze.*image)/i.test(query) ||
+          /(ghi|lưu|save|write|tạo file|create file|viết vào|output to).*(file|folder|path|~\/|\/Users|\/tmp|\.md|\.txt|\.json)/i.test(query) ||
+          /~\//.test(query)
         const skipCache = hasExternalUrl || needsToolExecution
         if (skipCache) invalidateCacheForQuery(query)
         stepStart = Date.now()
