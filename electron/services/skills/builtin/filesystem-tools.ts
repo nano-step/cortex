@@ -294,6 +294,10 @@ function expandTilde(p: string): string {
   return p
 }
 
+function hasAbsoluteOrTildePath(p: string): boolean {
+  return isAbsolute(p) || p === '~' || p.startsWith('~/')
+}
+
 function resolveSafePath(repoPaths: string[], relativePath: string): string {
   if (!relativePath || relativePath.trim() === '') {
     throw new Error('Path cannot be empty')
@@ -921,8 +925,18 @@ export async function executeBuiltinTool(
   let repoPaths: string[]
   try {
     repoPaths = getRepoPaths(projectId)
-  } catch (err) {
-    return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  } catch {
+    repoPaths = []
+  }
+
+  const pathArg = (
+    args.path ?? args.source ?? args.destination ??
+    (args as any).paths?.[0] ??
+    (args as any).edits?.[0]?.path ??
+    (args as any).directory
+  ) as string | undefined
+  if (repoPaths.length === 0 && (!pathArg || !hasAbsoluteOrTildePath(pathArg))) {
+    return { content: 'Error: No accessible repositories found for this project. Use an absolute path (e.g., ~/Documents/file.md) to write outside project repos.', isError: true }
   }
 
   switch (toolName) {
