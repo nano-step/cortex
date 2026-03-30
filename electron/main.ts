@@ -39,6 +39,7 @@ import {
 import { recordFeedbackSignal, convertSignalsToTrainingPairs, getFeedbackStats } from './services/feedback-collector'
 import { getAutoScanProgress, getAutoScanConfig, setAutoScanConfig } from './services/skills/learning/autoscan-engine'
 import { initTrainingEngine, shutdownTrainingEngine, triggerManualTraining } from './services/training/training-engine'
+import { notifyPostChat, notifyChatStarted, notifyChatEnded } from './services/training/training-scheduler'
 import { trainFromPairs, getLearnedWeightCount } from './services/learned-reranker'
 import { initDefaultVariant } from './services/query-optimizer'
 import { estimateTokens } from './services/context-compressor'
@@ -85,7 +86,7 @@ import { classifyIntentSmart, type SmartIntentResult } from './services/skills/s
 import {
   stageSanitize, stageMemory, stageIntentClassification, stageRouting,
   stageBeforeHooks, stageAfterHooks, determinePipelinePath, persistAssistantResponse,
-  dispatchBackgroundAgents, type ThinkingEmitter, type PipelinePath
+  dispatchBackgroundAgents, detectLoopTrigger, type ThinkingEmitter, type PipelinePath
 } from './services/chat-pipeline'
 import { loadPluginConfig, isHookDisabled, getPluginConfig } from './services/plugin-config'
 import { registerAllIPC } from './ipc'
@@ -644,6 +645,7 @@ app.whenReady().then(() => {
 
       try {
         console.log(`[Chat] Pipeline processing: "${query.slice(0, 100)}"`)
+        notifyChatStarted()
 
         // Pipeline Stage 0: Sanitize
         let stepStart = Date.now()
@@ -741,10 +743,6 @@ The following foundational policies govern ALL your actions (distilled from Clau
         // Pipeline Stage 2: Intent Classification
         const smartIntent = await stageIntentClassification(query, emitThinking)
 
-        // Pipeline Stage 3: Determine execution path
-        const pipelinePath = determinePipelinePath(query, smartIntent, agentMode)
-        console.log(`[Pipeline] Path: ${pipelinePath.path} (${pipelinePath.reason})`)
-
         let forcePerplexityMode = false
         if (query.startsWith('/perplexity ') || query.startsWith('/perplexity\n')) {
           query = query.replace(/^\/perplexity[\s]/, '')
@@ -791,6 +789,21 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         emitThinking('routing', 'done', 'Chọn model',
           `${routingDecision.category} → ${routedModel}`,
           Date.now() - stepStart)
+
+        const pipelinePath = determinePipelinePath(query, smartIntent, agentMode, routingDecision.category)
+        console.log(`[Pipeline] Path: ${pipelinePath.path} (${pipelinePath.reason})`)
+
+        const CATEGORY_SKILL_DIRECTIVES: Record<string, string> = {
+          'visual-engineering': '[SKILL: playwright-browser]\nSử dụng browser automation khi cần screenshot, tương tác UI, hoặc test giao diện.',
+          'deep':               '[SKILL: code-analysis + react-agent]\nPhân tích code sâu, trace call chain, tìm root cause trước khi đề xuất fix.',
+          'ultrabrain':         '[SKILL: plan-execute + react-agent]\nLập kế hoạch chi tiết trước khi implement. Break down thành atomic steps.',
+          'artistry':           '[SKILL: react-agent]\nTư duy sáng tạo, đề xuất giải pháp unconventional, không bị ràng buộc bởi patterns thông thường.',
+          'writing':            '[SKILL: react-agent]\nTập trung vào chất lượng văn phong, cấu trúc rõ ràng, audience phù hợp.',
+          'unspecified-high':   '[SKILL: react-agent]\nTask phức tạp — phân tích kỹ trước khi hành động.',
+        }
+        if (!agentMode && CATEGORY_SKILL_DIRECTIVES[routingDecision.category]) {
+          agentContext = agentContext + '\n\n' + CATEGORY_SKILL_DIRECTIVES[routingDecision.category]
+        }
 
         // V3: Run before:chat hooks (cost-guard, cache-check, context-window-monitor, etc.)
         const beforeHooks = await runHooks('before:chat', {
@@ -950,35 +963,75 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
         }
 
         if (pipelinePath.path === 'orchestrate' && !forcePerplexityMode) {
-          emitThinking('orchestrate', 'running', 'Multi-Agent Orchestrator', pipelinePath.reason)
+          const loopTrigger = detectLoopTrigger(query, routingDecision.category)
+          emitThinking('orchestrate', 'running', 'Multi-Agent Orchestrator',
+            loopTrigger ? `${pipelinePath.reason} [loop:${loopTrigger}]` : pipelinePath.reason)
           try {
-            const bgTasks = await dispatchBackgroundAgents(query, projectId, conversationId, smartIntent, emitThinking)
-            const orchResult = await orchestrate({
-              query, projectId, conversationId, mode: mode as 'pm' | 'engineering'
-            })
+            const bgTasks = await dispatchBackgroundAgents(query, projectId, conversationId, smartIntent, emitThinking, routingDecision.category)
 
-            const hasResults = orchResult.agentOutputs.some(o => o.status === 'completed' && o.content.trim().length > 0)
+            let orchResponse = ''
 
-            if (hasResults) {
-              const agentList = orchResult.activatedAgents.join(', ')
-              emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator',
-                `${orchResult.activatedAgents.length} agents: ${agentList} (${orchResult.totalDurationMs}ms)`)
+            if (loopTrigger) {
+              const loopConfig = loopTrigger === 'ultrawork' ? createUltraworkConfig() : createRalphConfig({
+                completionCheck: (state) => {
+                  const last = state.steps[state.steps.length - 1]
+                  if (!last) return false
+                  const content = (last.result ?? '').toLowerCase()
+                  return (
+                    last.result === 'DONE' ||
+                    last.result === 'ALL_COMPLETE' ||
+                    /\b(hoàn thành|done|complete|finished|all tasks)\b/.test(content)
+                  )
+                }
+              })
+              const loopState = createLoop(loopConfig, { projectId, conversationId, query })
+              emitThinking('loop', 'running', `Loop: ${loopTrigger}`, `Max ${loopConfig.maxIterations} iterations`)
 
-              const header = `## Multi-Agent Analysis\n**Intent:** ${orchResult.intent.primaryIntent} (confidence: ${(orchResult.intent.confidence * 100).toFixed(0)}%)\n**Team:** ${agentList}\n**Duration:** ${orchResult.totalDurationMs}ms\n\n`
-              const agentResponse = header + orchResult.response
-
-              await stageAfterHooks({
-                projectId, conversationId, query, response: agentResponse,
-                model: routedModel, metadata: { path: 'orchestrate', bgTasks }
-              }, emitThinking)
-
-              mainWindow?.webContents.send('chat:stream', { conversationId, content: agentResponse, done: true })
-              persistAssistantResponse(conversationId, agentResponse)
-              return { success: true, content: agentResponse, contextChunks: [] }
+              let lastContent = ''
+              await startLoop(loopState.id, async (iteration) => {
+                const iterResult = await orchestrate({ query, projectId, conversationId, mode: mode as 'pm' | 'engineering' })
+                const iterContent = iterResult.response ?? ''
+                lastContent = iterContent
+                const isDone = iterResult.agentOutputs.every(o => o.status !== 'running') &&
+                  /\b(hoàn thành|done|complete|finished|all tasks)\b/i.test(iterContent)
+                return {
+                  id: `step-${iteration}`,
+                  description: `Iteration ${iteration}`,
+                  status: 'completed' as const,
+                  result: isDone ? 'DONE' : iterContent.slice(0, 100),
+                  startedAt: Date.now(),
+                  completedAt: Date.now(),
+                  iteration
+                }
+              })
+              orchResponse = lastContent
+              emitThinking('loop', 'done', `Loop: ${loopTrigger}`, `Completed`)
+            } else {
+              const orchResult = await orchestrate({ query, projectId, conversationId, mode: mode as 'pm' | 'engineering' })
+              const hasResults = orchResult.agentOutputs.some(o => o.status === 'completed' && o.content.trim().length > 0)
+              if (!hasResults) {
+                console.warn('[Pipeline] Orchestrator produced no results, falling through to standard flow')
+                emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator', 'Không có kết quả, chuyển sang RAG → LLM')
+              } else {
+                const agentList = orchResult.activatedAgents.join(', ')
+                const header = `## Multi-Agent Analysis\n**Intent:** ${orchResult.intent.primaryIntent} (confidence: ${(orchResult.intent.confidence * 100).toFixed(0)}%)\n**Team:** ${agentList}\n**Duration:** ${orchResult.totalDurationMs}ms\n\n`
+                orchResponse = header + orchResult.response
+                emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator',
+                  `${orchResult.activatedAgents.length} agents: ${agentList} (${orchResult.totalDurationMs}ms)`)
+              }
             }
 
-            console.warn('[Pipeline] Orchestrator produced no results, falling through to standard flow')
-            emitThinking('orchestrate', 'done', 'Multi-Agent Orchestrator', 'Không có kết quả, chuyển sang RAG → LLM')
+            if (orchResponse.trim().length > 0) {
+              await stageAfterHooks({
+                projectId, conversationId, query, response: orchResponse,
+                model: routedModel, metadata: { path: 'orchestrate', bgTasks }
+              }, emitThinking)
+              mainWindow?.webContents.send('chat:stream', { conversationId, content: orchResponse, done: true })
+              persistAssistantResponse(conversationId, orchResponse)
+              notifyChatEnded()
+              notifyPostChat(projectId)
+              return { success: true, content: orchResponse, contextChunks: [] }
+            }
           } catch (orchErr) {
             console.warn('[Pipeline] Orchestrator failed, falling through to standard:', orchErr)
             emitThinking('orchestrate', 'error', 'Multi-Agent Orchestrator', 'Fallback to standard flow')
@@ -1005,6 +1058,8 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
 
               mainWindow?.webContents.send('chat:stream', { conversationId, content: reactResult.content, done: true })
               persistAssistantResponse(conversationId, reactResult.content)
+              notifyChatEnded()
+              notifyPostChat(projectId)
               return { success: true, content: reactResult.content, contextChunks: [] }
             }
             emitThinking('skill_chain', 'done', 'Skill Chain', 'ReAct returned empty, falling through to RAG')
@@ -1828,6 +1883,9 @@ Return ONLY the enhanced prompt, nothing else.`
         } catch {
           // Non-fatal
         }
+
+        notifyChatEnded()
+        notifyPostChat(projectId)
 
         return {
           success: true,

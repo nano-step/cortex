@@ -202,12 +202,35 @@ export async function stageAfterHooks(
  */
 export type PipelinePath = 'slash_command' | 'orchestrate' | 'skill_chain' | 'perplexity' | 'standard'
 
+const CATEGORY_PATH_MAP: Record<string, PipelinePath> = {
+  'deep':               'orchestrate',
+  'ultrabrain':         'orchestrate',
+  'unspecified-high':   'orchestrate',
+  'visual-engineering': 'skill_chain',
+  'artistry':           'skill_chain',
+  'writing':            'skill_chain',
+  'quick':              'standard',
+  'unspecified-low':    'standard',
+}
+
+const LOOP_TRIGGER_PATTERNS = [
+  /liên tục|cho đến khi|keep going|until done|tự động hoàn|autonomous|không dừng|run until|keep running/i
+]
+
+export function detectLoopTrigger(query: string, category: string): 'ralph' | 'ultrawork' | null {
+  const hasLoopKeyword = LOOP_TRIGGER_PATTERNS.some(p => p.test(query))
+  if (hasLoopKeyword) return 'ralph'
+  if ((category === 'ultrabrain') && query.length > 300) return 'ultrawork'
+  if ((category === 'deep') && query.length > 500) return 'ralph'
+  return null
+}
+
 export function determinePipelinePath(
   query: string,
   intent: SmartIntentResult | null,
-  agentMode: string | undefined
+  agentMode: string | undefined,
+  routingCategory?: string
 ): { path: PipelinePath; reason: string } {
-  // Slash commands always take priority
   if (/^\/\w+/.test(query)) {
     if (query.startsWith('/perplexity ') || query.startsWith('/perplexity\n')) {
       return { path: 'perplexity', reason: '/perplexity command' }
@@ -218,22 +241,28 @@ export function determinePipelinePath(
     return { path: 'slash_command', reason: `Slash command: ${query.match(/^\/(\w+)/)?.[1]}` }
   }
 
-  // Tool-only queries: skip heavy processing, go straight to LLM with tools
   const toolOnlyPatterns = /(vẽ|hãy vẽ|giúp.*vẽ|draw|generate.*(image|hình|ảnh)|tạo.*(ảnh|hình|image)|create.*(image|picture)|edit.*(image|ảnh)|chỉnh.*ảnh|thiết kế.*hình|làm.*hình|tạo.*hình)/i
   if (toolOnlyPatterns.test(query)) {
     return { path: 'standard', reason: 'Tool-only query (image gen) — skip orchestrator' }
   }
 
+  if (routingCategory && CATEGORY_PATH_MAP[routingCategory]) {
+    const path = CATEGORY_PATH_MAP[routingCategory]
+    if (path !== 'standard') {
+      return { path, reason: `Category routing: ${routingCategory} → ${path}` }
+    }
+  }
+
   if (intent) {
-    if (intent.category === 'reasoning' && intent.confidence >= 0.7) {
+    if (intent.category === 'reasoning' && intent.confidence >= 0.5) {
       return { path: 'skill_chain', reason: `Intent: reasoning (${intent.confidence.toFixed(2)})` }
     }
-    if (intent.confidence >= 0.8 && (
+    if (intent.confidence >= 0.6 && (
       intent.category === 'code' ||
       intent.category === 'agent' ||
       (intent.needsToolUse && intent.needsExternalInfo)
     )) {
-      return { path: 'orchestrate', reason: `Complex intent: ${intent.category} + tools + external` }
+      return { path: 'orchestrate', reason: `Complex intent: ${intent.category} (${intent.confidence.toFixed(2)})` }
     }
   }
 
@@ -260,17 +289,28 @@ export function persistAssistantResponse(conversationId: string, content: string
 // Background Agent Dispatch (Phase 3)
 // =====================
 
+const CATEGORY_BG_AGENTS: Record<string, Array<'explore' | 'librarian'>> = {
+  'deep':               ['explore', 'librarian'],
+  'ultrabrain':         ['explore', 'librarian'],
+  'visual-engineering': ['explore'],
+  'unspecified-high':   ['explore'],
+}
+
 export async function dispatchBackgroundAgents(
   query: string,
   projectId: string,
   conversationId: string,
   intent: SmartIntentResult | null,
-  emit: ThinkingEmitter
+  emit: ThinkingEmitter,
+  routingCategory?: string
 ): Promise<string[]> {
   const taskIds: string[] = []
 
-  // Fire explore agent for codebase-related queries
-  if (intent?.isAboutCode) {
+  const categoryAgents = routingCategory ? (CATEGORY_BG_AGENTS[routingCategory] ?? []) : []
+  const needsExplore = categoryAgents.includes('explore') || intent?.isAboutCode
+  const needsLibrarian = categoryAgents.includes('librarian') || intent?.needsExternalInfo
+
+  if (needsExplore) {
     const taskId = launchTask({
       description: `Explore: ${query.slice(0, 80)}`,
       category: 'explore',
@@ -284,12 +324,10 @@ export async function dispatchBackgroundAgents(
         }).catch(() => null)
       }
     })
-
     taskIds.push(taskId)
-    emit('background', 'running', 'Background agents', `${taskIds.length} agents dispatched`)
   }
 
-  if (intent?.needsExternalInfo) {
+  if (needsLibrarian) {
     const taskId = launchTask({
       description: `Web search: ${query.slice(0, 80)}`,
       category: 'search',
@@ -303,9 +341,11 @@ export async function dispatchBackgroundAgents(
         }).catch(() => null)
       }
     })
-
     taskIds.push(taskId)
-    emit('background', 'running', 'Background agents', `${taskIds.length} agents dispatched`)
+  }
+
+  if (taskIds.length > 0) {
+    emit('background', 'running', 'Background agents', `${taskIds.length} agent(s) dispatched`)
   }
 
   return taskIds
