@@ -219,7 +219,7 @@ async function getCurrentModel(): Promise<string> {
   }
 
   if (cachedModels.length === 0) {
-    return 'gpt-5.1'
+    throw new Error('No models available from proxy. Check proxy URL and API key in Settings.')
   }
 
   if (rotationModelIndex >= cachedModels.length) {
@@ -258,15 +258,15 @@ function isAuthError(status: number): boolean {
   return status === 401 || status === 403
 }
 
-// Export for settings UI / IPC
-const DEFAULT_FALLBACK_MODEL = 'gpt-4o-mini'
-
 export function getActiveModel(): string {
   if (userSelectedModelId && cachedModels.some(m => m.id === userSelectedModelId)) {
     return userSelectedModelId
   }
-  if (cachedModels.length === 0) return DEFAULT_FALLBACK_MODEL
-  if (rotationModelIndex >= cachedModels.length) return cachedModels[0]?.id || DEFAULT_FALLBACK_MODEL
+  if (cachedModels.length === 0) {
+    console.warn('[LLM] getActiveModel called with empty model cache — returning empty string, caller should await fetchAvailableModels() first')
+    return ''
+  }
+  if (rotationModelIndex >= cachedModels.length) return cachedModels[0].id
   return cachedModels[rotationModelIndex].id
 }
 

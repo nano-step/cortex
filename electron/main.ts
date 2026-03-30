@@ -767,7 +767,11 @@ CRITICAL: Nếu bạn trả lời mà KHÔNG gọi cortex_perplexity_search ho�
           prompt: query,
           slashCommand: slashCmd
         })
-        const userModel = getActiveModel()
+        let userModel = getActiveModel()
+        if (!userModel) {
+          await fetchAvailableModels()
+          userModel = getActiveModel()
+        }
         const useRoutedModel = routingDecision.confidence >= 0.9
         routedModel = useRoutedModel ? routingDecision.model : userModel
         if (forcePerplexityMode) {

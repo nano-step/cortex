@@ -1,10 +1,5 @@
 import type { HookDefinition, HookContext, HookResult } from '../types'
-
-const DEFAULT_FALLBACK_CHAIN = [
-  'claude-sonnet-4-20250514',
-  'gpt-4o',
-  'gemini-2.5-flash'
-]
+import { getAvailableModels } from '../../llm-client'
 
 export const modelFallbackHook: HookDefinition = {
   id: 'model-fallback',
@@ -15,11 +10,15 @@ export const modelFallbackHook: HookDefinition = {
   enabled: true,
   handler(context: HookContext): HookResult {
     if (!context.error || !context.model) return {}
-    const chain = (context.metadata?.fallbackChain as string[]) || DEFAULT_FALLBACK_CHAIN
-    const currentIndex = chain.indexOf(context.model)
-    const nextModel = currentIndex >= 0 && currentIndex < chain.length - 1
-      ? chain[currentIndex + 1]
-      : chain.find(m => m !== context.model)
+
+    const readyModels = getAvailableModels()
+      .filter(m => m.status === 'ready' && m.id !== context.model)
+      .sort((a, b) => b.tier - a.tier)
+
+    const explicitChain = context.metadata?.fallbackChain as string[] | undefined
+    const nextModel = explicitChain
+      ? explicitChain.find(id => readyModels.some(m => m.id === id))
+      : readyModels[0]?.id
 
     if (nextModel) {
       return {
