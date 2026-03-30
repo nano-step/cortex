@@ -4,7 +4,7 @@
 
 **The AI Brain That Knows Your Codebase**
 
-[![Version](https://img.shields.io/badge/version-4.3.0%20Synapse-orange.svg)](https://github.com/hoainho/cortex/releases)
+[![Version](https://img.shields.io/badge/version-4.4.0%20Thalamus-orange.svg)](https://github.com/hoainho/cortex/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://github.com/hoainho/cortex/releases)
 [![Built With](https://img.shields.io/badge/built%20with-Electron%20%2B%20React%20%2B%20TypeScript-61DAFB.svg)](#tech-stack)
@@ -13,8 +13,8 @@ A desktop AI assistant that deeply understands your entire codebase — not a Ch
 
 [⬇️ Download for Mac](https://github.com/hoainho/cortex/releases) · [📖 Setup Guide](docs/SETUP_GUIDE.md) · [📋 Changelog](CHANGELOG.md) · [🏗️ Architecture](ARCHITECTURE.md) · [📦 Skill Catalog](SKILL_CATALOG.md)
 
-**What's new in v4.3.0 "Synapse":**
-Document Intelligence (PDF/DOCX/XLSX/CSV) · Agent Brain upgraded with 10 Core Policies · Filesystem Tools overhauled (9 tools, batch I/O) · 429 Rate Limit Resilience · 15 agents upgraded with production policies
+**What's new in v4.4.0 "Thalamus":**
+Full-Stack Activation — 80% → >60% queries now use multi-agent orchestration · Smart category-based pipeline routing · Loop auto-activation (Ralph/Ultrawork) · Proactive background agents · Training feedback loop closed · OMO infrastructure fully wired
 
 </div>
 
@@ -358,6 +358,83 @@ What's the database schema for users?
 
 Project Settings → Enable AutoScan → Cortex starts training itself from your codebase 24/7.
 Check progress: Learning Dashboard → AutoScan tab (shows pairs generated, budget used, circuit state).
+
+---
+
+## What's New in v4.4.0 "Thalamus"
+
+> **Thalamus** — the brain's relay station, routing signals to exactly the right region for processing. This release does the same for Cortex: every query is now routed to the right infrastructure layer automatically.
+
+### Full-Stack Activation — All 5 Phases
+
+**Phase 1 — Smart Pipeline Routing**
+
+`determinePipelinePath()` now uses routing category as primary signal, not just intent confidence:
+
+| Category | Old path | New path |
+|----------|----------|----------|
+| `deep` / `ultrabrain` | `standard` (if confidence < 0.8) | `orchestrate` (always) |
+| `visual-engineering` | `standard` | `skill_chain` + playwright directives |
+| `unspecified-high` | `standard` | `orchestrate` |
+| `quick` / `unspecified-low` | `standard` | `standard` (unchanged, no overhead) |
+
+Confidence thresholds lowered: `skill_chain` 0.7→0.5, `orchestrate` 0.8→0.6.
+
+**Phase 2 — Category → Skill Auto-Activation**
+
+Each routing category automatically injects task-specific skill directives into system prompt — no slash command needed:
+- `deep` → code-analysis + react-agent (trace call chain, root cause first)
+- `ultrabrain` → plan-execute + react-agent (plan before implement)
+- `visual-engineering` → playwright-browser (browser automation when needed)
+- `writing` → react-agent (structure, audience, prose quality)
+
+**Phase 3 — Proactive Background Agents**
+
+Background agents now fire based on routing category, not just intent signals:
+- `deep` / `ultrabrain` → explore + librarian fire in parallel
+- `visual-engineering` / `unspecified-high` → explore fires
+- Results merge into context if ready within 2s, discarded if not
+
+**Phase 4 — Loop Auto-Activation**
+
+Ralph and Ultrawork loops now activate automatically:
+- Query contains `"liên tục"`, `"không dừng"`, `"until done"`, `"autonomous"` → Ralph loop
+- Category `ultrabrain` + query > 300 chars → Ultrawork loop
+- Completion detection: regex on response (`"hoàn thành"`, `"done"`, `"complete"`)
+- Integrated into orchestrate path — standard path unaffected
+
+**Phase 5 — Training Feedback Loop Closed**
+
+Every interaction now feeds the training pipeline:
+- `notifyChatStarted()` at pipeline entry
+- `notifyPostChat(projectId)` + `notifyChatEnded()` after every successful response
+- Works across orchestrate, skill_chain, and standard paths
+- AutoScan scheduler receives signal to trigger training runs
+
+### Model Routing Fixes
+
+- `routeToModel()` now cross-references live `getAvailableModels()` status — never routes to a `quota_exhausted` model
+- `getActiveModel()` returns `''` instead of hardcoded `gpt-4o-mini` when cache empty — triggers `fetchAvailableModels()` instead
+- `model-fallback` hook now uses dynamic ready models sorted by tier instead of hardcoded chain
+- Agent pool logs warning when falling back to hardcoded tier fallback (was silent)
+
+### OMO Infrastructure Integration
+
+- Hook system fully wired: `on:session:start`, `on:tool:call`, `on:session:end` now active
+- Session lifecycle hooks: preload instincts + memory crystals at session start, extract instincts at session end
+- Plugin config (`cortex-config.jsonc`): per-agent model override, category model override, hook disable list
+- Background concurrency config applied from plugin config at startup
+- 60s stale task detection + cleanup interval
+
+### Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Queries using multi-agent orchestration | ~20% | >60% |
+| Background agents (deep/ultrabrain queries) | ~30% | 100% |
+| Loop activation | Manual slash command only | Auto-detect from keywords |
+| Training signal per interaction | 0 | 100% |
+| Latency for `quick` queries | baseline | unchanged |
 
 ---
 
