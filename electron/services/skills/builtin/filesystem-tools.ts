@@ -1,11 +1,18 @@
 /**
  * Built-in Filesystem Tools for Cortex AI Chat
  *
- * Provides 4 tools that allow the AI to interact with project source code:
+ * Provides 11 tools that allow the AI to interact with project source code:
  * - cortex_read_file: Read file content
+ * - cortex_read_files: Batch read multiple files
  * - cortex_write_file: Write/create files
- * - cortex_edit_file: Search & replace in files
+ * - cortex_edit_file: Search & replace in files (with fuzzy matching fallback)
+ * - cortex_edit_file_lines: Edit by line range
+ * - cortex_edit_files: Batch search & replace across files
  * - cortex_list_directory: List directory contents
+ * - cortex_grep_search: Regex search across project
+ * - cortex_move_file: Move/rename files
+ * - cortex_delete_file: Delete files
+ * - cortex_read_document: Read PDF/DOCX/XLSX/CSV documents
  *
  * All paths are sandboxed to project repository directories for security.
  */
@@ -92,6 +99,35 @@ const TOOL_DEFINITIONS: MCPToolDefinition[] = [
           }
         },
         required: ['path', 'old_string', 'new_string']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cortex_edit_file_lines',
+      description: 'Edit a file by replacing a range of lines (1-indexed, inclusive) with new content. Use cortex_read_file with offset+limit to verify exact line numbers first. Accepts relative or absolute paths (including ~/). Absolute paths outside repo may require user approval.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'File path: relative to repo root or absolute (e.g., "~/Documents/file.md")'
+          },
+          start_line: {
+            type: 'number',
+            description: 'First line to replace (1-indexed, inclusive)'
+          },
+          end_line: {
+            type: 'number',
+            description: 'Last line to replace (1-indexed, inclusive). Use same as start_line to replace a single line.'
+          },
+          new_content: {
+            type: 'string',
+            description: 'The new content to insert in place of the specified line range. Can be empty string to delete lines.'
+          }
+        },
+        required: ['path', 'start_line', 'end_line', 'new_content']
       }
     }
   },
@@ -458,34 +494,96 @@ function countOccurrences(haystack: string, needle: string): number {
   return count
 }
 
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+
+  const matrix: number[][] = []
+  for (let i = 0; i <= a.length; i++) matrix[i] = [i]
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      )
+    }
+  }
+  return matrix[a.length][b.length]
+}
+
+function lineSimilarity(a: string, b: string): number {
+  if (a === b) return 1.0
+  const maxLen = Math.max(a.length, b.length)
+  if (maxLen === 0) return 1.0
+  return 1 - levenshteinDistance(a, b) / maxLen
+}
+
 function tryFuzzyMatch(original: string, oldString: string): { matched: string; strategy: string } | null {
-  const trimmedOld = oldString.split('\n').map(l => l.trim()).join('\n')
-  const trimmedOriginal = original.split('\n').map(l => l.trim()).join('\n')
-  if (trimmedOriginal.includes(trimmedOld)) {
-    const origLines = original.split('\n')
-    const oldLines = oldString.split('\n').map(l => l.trim())
-    for (let i = 0; i <= origLines.length - oldLines.length; i++) {
-      const window = origLines.slice(i, i + oldLines.length)
-      if (window.every((line, j) => line.trim() === oldLines[j])) {
-        return { matched: window.join('\n'), strategy: 'whitespace-normalized' }
-      }
+  const origLines = original.split('\n')
+  const oldLines = oldString.split('\n')
+
+  if (oldLines.length > 1 && oldLines[oldLines.length - 1] === '') {
+    oldLines.pop()
+  }
+
+  if (oldLines.length === 0) return null
+
+  const oldLinesTrimmed = oldLines.map(l => l.trim())
+
+  // Tier 1: Whitespace-normalized line matching
+  for (let i = 0; i <= origLines.length - oldLines.length; i++) {
+    const window = origLines.slice(i, i + oldLines.length)
+    if (window.every((line, j) => line.trim() === oldLinesTrimmed[j])) {
+      return { matched: window.join('\n'), strategy: 'whitespace-normalized' }
     }
   }
 
-  const normalizedOld = oldString.replace(/\s+/g, ' ').trim()
-  const normalizedOriginal = original.replace(/\s+/g, ' ').trim()
-  if (normalizedOriginal.includes(normalizedOld)) {
-    const startIdx = normalizedOriginal.indexOf(normalizedOld)
-    let charCount = 0
-    let realStart = 0
-    const collapsed = original.replace(/\s+/g, ' ').trim()
-    for (let i = 0; i < original.length && charCount < startIdx; i++) {
-      if (original[i] === collapsed[charCount]) charCount++
-      if (charCount === startIdx) { realStart = i + 1; break }
+  // Tier 2: Block anchor matching (3+ lines, first/last line anchors only)
+  if (oldLines.length >= 3) {
+    const firstAnchor = oldLinesTrimmed[0]
+    const lastAnchor = oldLinesTrimmed[oldLinesTrimmed.length - 1]
+    const blockSize = oldLines.length
+
+    for (let i = 0; i <= origLines.length - blockSize; i++) {
+      if (origLines[i].trim() !== firstAnchor) continue
+      if (origLines[i + blockSize - 1].trim() !== lastAnchor) continue
+      const window = origLines.slice(i, i + blockSize)
+      return { matched: window.join('\n'), strategy: 'block-anchor' }
     }
-    if (realStart > 0) {
-      return null
+  }
+
+  // Tier 3: Levenshtein line-similarity matching (per-line sim >= 0.8, avg >= 0.85)
+  const LINE_THRESHOLD = 0.8
+  const AVG_THRESHOLD = 0.85
+  let bestWindow: string[] | null = null
+  let bestAvg = 0
+
+  for (let i = 0; i <= origLines.length - oldLines.length; i++) {
+    const window = origLines.slice(i, i + oldLines.length)
+    let allPass = true
+    let totalSim = 0
+
+    for (let j = 0; j < oldLines.length; j++) {
+      const sim = lineSimilarity(window[j].trim(), oldLinesTrimmed[j])
+      if (sim < LINE_THRESHOLD) { allPass = false; break }
+      totalSim += sim
     }
+
+    if (!allPass) continue
+    const avg = totalSim / oldLines.length
+    if (avg >= AVG_THRESHOLD && avg > bestAvg) {
+      bestAvg = avg
+      bestWindow = window
+    }
+  }
+
+  if (bestWindow) {
+    return { matched: bestWindow.join('\n'), strategy: 'levenshtein-similarity' }
   }
 
   return null
@@ -543,11 +641,67 @@ function toolEditFile(repoPaths: string[], args: { path: string; old_string: str
       : `\n\nThe first line of your search ("${firstLine.slice(0, 60)}") was not found anywhere in the file.`
 
     return {
-      content: `old_string not found in "${args.path}". Tried: exact match → whitespace-normalized match → both failed.${hintText}`,
+      content: `old_string not found in "${args.path}". Tried: exact match → whitespace-normalized → block-anchor → levenshtein-similarity → all failed.${hintText}`,
       isError: true
     }
   } catch (err) {
     return { content: `Error editing file: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
+}
+
+function toolEditFileLines(
+  repoPaths: string[],
+  args: { path: string; start_line: number; end_line: number; new_content: string }
+): { content: string; isError: boolean } {
+  try {
+    const absPath = resolveSafePath(repoPaths, args.path)
+
+    if (!existsSync(absPath)) {
+      return { content: `File not found: ${args.path}`, isError: true }
+    }
+
+    const stat = statSync(absPath)
+    if (stat.isDirectory()) {
+      return { content: `"${args.path}" is a directory, not a file.`, isError: true }
+    }
+
+    const original = readFileSync(absPath, 'utf-8')
+    const lines = original.split('\n')
+    const totalLines = lines.length
+
+    const startLine = Math.floor(args.start_line)
+    const endLine = Math.floor(args.end_line)
+
+    if (startLine < 1 || endLine < 1) {
+      return { content: `Line numbers must be >= 1. Got start_line=${startLine}, end_line=${endLine}`, isError: true }
+    }
+    if (startLine > endLine) {
+      return { content: `start_line (${startLine}) must be <= end_line (${endLine})`, isError: true }
+    }
+    if (startLine > totalLines) {
+      return { content: `start_line (${startLine}) exceeds file length (${totalLines} lines)`, isError: true }
+    }
+
+    const effectiveEnd = Math.min(endLine, totalLines)
+    const removedCount = effectiveEnd - startLine + 1
+    const newLines = args.new_content === '' ? [] : args.new_content.split('\n')
+
+    const updated = [
+      ...lines.slice(0, startLine - 1),
+      ...newLines,
+      ...lines.slice(effectiveEnd)
+    ].join('\n')
+
+    writeFileSync(absPath, updated, 'utf-8')
+
+    const action = newLines.length === 0
+      ? `Deleted ${removedCount} line${removedCount > 1 ? 's' : ''}`
+      : `Replaced ${removedCount} line${removedCount > 1 ? 's' : ''} with ${newLines.length} new line${newLines.length > 1 ? 's' : ''}`
+
+    console.log(`[FilesystemTools] Edit lines: ${args.path} L${startLine}-${effectiveEnd} (${action})`)
+    return { content: `${action} in ${args.path} (lines ${startLine}-${effectiveEnd})`, isError: false }
+  } catch (err) {
+    return { content: `Error editing file lines: ${err instanceof Error ? err.message : String(err)}`, isError: true }
   }
 }
 
@@ -948,6 +1102,9 @@ export async function executeBuiltinTool(
 
     case 'cortex_edit_file':
       return toolEditFile(repoPaths, args as { path: string; old_string: string; new_string: string })
+
+    case 'cortex_edit_file_lines':
+      return toolEditFileLines(repoPaths, args as { path: string; start_line: number; end_line: number; new_content: string })
 
     case 'cortex_list_directory':
       return toolListDirectory(repoPaths, args as { path?: string; recursive?: boolean; depth?: number; extensions?: string[] })
