@@ -523,19 +523,54 @@ function lineSimilarity(a: string, b: string): number {
   return 1 - levenshteinDistance(a, b) / maxLen
 }
 
-function tryFuzzyMatch(original: string, oldString: string): { matched: string; strategy: string } | null {
-  const origLines = original.split('\n')
-  const oldLines = oldString.split('\n')
+const BRACKET_LINES = new Set(['}', '};', ']);', ');', '});', '})', ']', ')'])
 
-  if (oldLines.length > 1 && oldLines[oldLines.length - 1] === '') {
-    oldLines.pop()
+function leadingWhitespace(line: string): string {
+  const match = line.match(/^(\s*)/)
+  return match ? match[1] : ''
+}
+
+function matchUniformIndent(origLines: string[], oldLines: string[]): { index: number; indentOffset: string } | null {
+  const oldLinesLstripped = oldLines.map(l => l.trimStart())
+
+  for (let i = 0; i <= origLines.length - oldLines.length; i++) {
+    const window = origLines.slice(i, i + oldLines.length)
+    if (!window.every((line, j) => line.trimStart() === oldLinesLstripped[j])) continue
+
+    const offsets = new Set<string>()
+    for (let j = 0; j < oldLines.length; j++) {
+      if (!oldLines[j].trim()) continue
+      const origLead = leadingWhitespace(window[j])
+      const oldLead = leadingWhitespace(oldLines[j])
+      if (origLead.length < oldLead.length) return null
+      offsets.add(origLead.slice(0, origLead.length - oldLead.length))
+    }
+    if (offsets.size === 1) {
+      return { index: i, indentOffset: [...offsets][0] }
+    }
   }
+  return null
+}
 
+interface FuzzyMatchResult {
+  matched: string
+  strategy: string
+  indentOffset?: string
+}
+
+function tryFuzzyMatchCore(origLines: string[], oldLines: string[]): FuzzyMatchResult | null {
   if (oldLines.length === 0) return null
 
   const oldLinesTrimmed = oldLines.map(l => l.trim())
 
-  // Tier 1: Whitespace-normalized line matching
+  // Tier 1: Uniform indent detection — detect ALL lines differ by same prefix, enables re-indentation
+  const uniformResult = matchUniformIndent(origLines, oldLines)
+  if (uniformResult) {
+    const window = origLines.slice(uniformResult.index, uniformResult.index + oldLines.length)
+    return { matched: window.join('\n'), strategy: 'uniform-indent', indentOffset: uniformResult.indentOffset }
+  }
+
+  // Tier 2: Whitespace-normalized line matching — each line trimmed independently
   for (let i = 0; i <= origLines.length - oldLines.length; i++) {
     const window = origLines.slice(i, i + oldLines.length)
     if (window.every((line, j) => line.trim() === oldLinesTrimmed[j])) {
@@ -543,7 +578,7 @@ function tryFuzzyMatch(original: string, oldString: string): { matched: string; 
     }
   }
 
-  // Tier 2: Block anchor matching (3+ lines, first/last line anchors only)
+  // Tier 4: Block anchor matching (3+ lines, first/last line anchors only)
   if (oldLines.length >= 3) {
     const firstAnchor = oldLinesTrimmed[0]
     const lastAnchor = oldLinesTrimmed[oldLinesTrimmed.length - 1]
@@ -557,36 +592,173 @@ function tryFuzzyMatch(original: string, oldString: string): { matched: string; 
     }
   }
 
-  // Tier 3: Levenshtein line-similarity matching (per-line sim >= 0.8, avg >= 0.85)
-  const LINE_THRESHOLD = 0.8
-  const AVG_THRESHOLD = 0.85
+  // Tier 5: Ellipsis/dotdotdots — LLM uses "..." to mean "keep unchanged lines"
+  const dotsResult = tryDotDotDots(origLines.join('\n'), oldLines.join('\n'))
+  if (dotsResult) {
+    return dotsResult
+  }
+
+  // Tier 6: Levenshtein with bracket protection + distance-proportional threshold
+  const levenResult = levenshteinWindowMatch(origLines, oldLines, oldLinesTrimmed, false)
+  if (levenResult) return levenResult
+
+  // Tier 7: Variable-length window Levenshtein (±10% block size)
+  const varResult = levenshteinWindowMatch(origLines, oldLines, oldLinesTrimmed, true)
+  if (varResult) return varResult
+
+  return null
+}
+
+function tryDotDotDots(whole: string, part: string): FuzzyMatchResult | null {
+  const dotsRe = /(^\s*\.{3,}\s*$)/m
+  const pieces = part.split(dotsRe).filter(p => !dotsRe.test(p))
+  if (pieces.length < 2) return null
+
+  for (const piece of pieces) {
+    if (piece.trim() && !whole.includes(piece.trim())) {
+      const wholeLines = whole.split('\n')
+      const pieceLines = piece.trim().split('\n')
+      let found = false
+      for (let i = 0; i <= wholeLines.length - pieceLines.length; i++) {
+        if (wholeLines.slice(i, i + pieceLines.length).every((l, j) => l.trim() === pieceLines[j].trim())) {
+          found = true
+          break
+        }
+      }
+      if (!found) return null
+    }
+  }
+
+  const firstPiece = pieces[0].trim()
+  const lastPiece = pieces[pieces.length - 1].trim()
+  if (!firstPiece || !lastPiece) return null
+
+  const wholeLines = whole.split('\n')
+  const firstLines = firstPiece.split('\n')
+  const lastLines = lastPiece.split('\n')
+
+  let startIdx = -1
+  for (let i = 0; i <= wholeLines.length - firstLines.length; i++) {
+    if (wholeLines.slice(i, i + firstLines.length).every((l, j) => l.trim() === firstLines[j].trim())) {
+      startIdx = i
+      break
+    }
+  }
+  if (startIdx === -1) return null
+
+  let endIdx = -1
+  for (let i = startIdx + firstLines.length; i <= wholeLines.length - lastLines.length; i++) {
+    if (wholeLines.slice(i, i + lastLines.length).every((l, j) => l.trim() === lastLines[j].trim())) {
+      endIdx = i + lastLines.length
+      break
+    }
+  }
+  if (endIdx === -1) return null
+
+  const matched = wholeLines.slice(startIdx, endIdx).join('\n')
+  return { matched, strategy: 'ellipsis' }
+}
+
+function levenshteinWindowMatch(
+  origLines: string[], oldLines: string[], oldLinesTrimmed: string[], variableLength: boolean
+): FuzzyMatchResult | null {
+  const baseLen = oldLines.length
+  const minLen = variableLength ? Math.floor(baseLen * 0.9) : baseLen
+  const maxLen = variableLength ? Math.ceil(baseLen * 1.1) : baseLen
+
   let bestWindow: string[] | null = null
   let bestAvg = 0
 
-  for (let i = 0; i <= origLines.length - oldLines.length; i++) {
-    const window = origLines.slice(i, i + oldLines.length)
-    let allPass = true
-    let totalSim = 0
+  for (let len = minLen; len <= maxLen; len++) {
+    for (let i = 0; i <= origLines.length - len; i++) {
+      const window = origLines.slice(i, i + len)
+      let allPass = true
+      let totalSim = 0
 
-    for (let j = 0; j < oldLines.length; j++) {
-      const sim = lineSimilarity(window[j].trim(), oldLinesTrimmed[j])
-      if (sim < LINE_THRESHOLD) { allPass = false; break }
-      totalSim += sim
-    }
+      const compareLen = Math.min(len, oldLinesTrimmed.length)
+      for (let j = 0; j < compareLen; j++) {
+        const origTrimmed = window[j].trim()
+        const searchTrimmed = oldLinesTrimmed[j] ?? ''
 
-    if (!allPass) continue
-    const avg = totalSim / oldLines.length
-    if (avg >= AVG_THRESHOLD && avg > bestAvg) {
-      bestAvg = avg
-      bestWindow = window
+        if (BRACKET_LINES.has(origTrimmed) || BRACKET_LINES.has(searchTrimmed)) {
+          if (origTrimmed !== searchTrimmed) { allPass = false; break }
+          totalSim += 1.0
+          continue
+        }
+
+        const threshold = Math.max(0, 0.48 - j * 0.04)
+        const sim = lineSimilarity(origTrimmed, searchTrimmed)
+        if (sim < threshold) { allPass = false; break }
+        totalSim += sim
+      }
+
+      if (!allPass) continue
+      const avg = totalSim / compareLen
+      if (avg >= 0.75 && avg > bestAvg) {
+        bestAvg = avg
+        bestWindow = window
+      }
     }
   }
 
   if (bestWindow) {
-    return { matched: bestWindow.join('\n'), strategy: 'levenshtein-similarity' }
+    return {
+      matched: bestWindow.join('\n'),
+      strategy: variableLength ? 'variable-window-levenshtein' : 'levenshtein-similarity'
+    }
+  }
+  return null
+}
+
+function tryFuzzyMatch(original: string, oldString: string): FuzzyMatchResult | null {
+  const origLines = original.split('\n')
+  const oldLines = oldString.split('\n')
+
+  if (oldLines.length > 1 && oldLines[oldLines.length - 1] === '') {
+    oldLines.pop()
+  }
+
+  const result = tryFuzzyMatchCore(origLines, oldLines)
+  if (result) return result
+
+  // Tier 3: Skip spurious leading blank line — LLMs often add blank lines at start
+  if (oldLines.length > 1 && !oldLines[0].trim()) {
+    const withoutBlank = oldLines.slice(1)
+    const retryResult = tryFuzzyMatchCore(origLines, withoutBlank)
+    if (retryResult) {
+      retryResult.strategy += '+skip-blank'
+      return retryResult
+    }
   }
 
   return null
+}
+
+function findSimilarBlock(origLines: string[], searchLines: string[]): string | null {
+  if (searchLines.length === 0) return null
+  const searchTrimmed = searchLines.map(l => l.trim())
+  let bestRatio = 0
+  let bestIdx = -1
+
+  for (let i = 0; i <= origLines.length - searchLines.length; i++) {
+    const window = origLines.slice(i, i + searchLines.length)
+    let matchCount = 0
+    for (let j = 0; j < searchLines.length; j++) {
+      if (window[j].trim() === searchTrimmed[j]) matchCount++
+      else if (lineSimilarity(window[j].trim(), searchTrimmed[j]) > 0.6) matchCount += 0.5
+    }
+    const ratio = matchCount / searchLines.length
+    if (ratio > bestRatio) {
+      bestRatio = ratio
+      bestIdx = i
+    }
+  }
+
+  if (bestRatio < 0.3 || bestIdx === -1) return null
+  const contextStart = Math.max(0, bestIdx - 3)
+  const contextEnd = Math.min(origLines.length, bestIdx + searchLines.length + 3)
+  const lines = origLines.slice(contextStart, contextEnd)
+  return lines.map((l, j) => `  Line ${contextStart + j + 1}: ${l.slice(0, 120)}`).join('\n')
 }
 
 function toolEditFile(repoPaths: string[], args: { path: string; old_string: string; new_string: string }): { content: string; isError: boolean } {
@@ -614,34 +786,43 @@ function toolEditFile(repoPaths: string[], args: { path: string; old_string: str
 
     const fuzzy = tryFuzzyMatch(original, args.old_string)
     if (fuzzy) {
-      const count = countOccurrences(original, fuzzy.matched)
-      const updated = original.split(fuzzy.matched).join(args.new_string)
-      writeFileSync(absPath, updated, 'utf-8')
-      console.log(`[FilesystemTools] Edited file (${fuzzy.strategy}): ${args.path} (${count} replacement${count > 1 ? 's' : ''})`)
-      return {
-        content: `Successfully replaced ${count} occurrence${count > 1 ? 's' : ''} in ${args.path} (matched via ${fuzzy.strategy})`,
-        isError: false
+      let replacement = args.new_string
+      if (fuzzy.indentOffset) {
+        replacement = args.new_string.split('\n').map(line =>
+          line.trim() ? fuzzy.indentOffset + line : line
+        ).join('\n')
+      }
+
+      const matchedLines = fuzzy.matched.split('\n').length
+      const replacementLines = replacement.split('\n').length
+      if (replacementLines < matchedLines * 0.5 && matchedLines > 4) {
+        console.log(`[FilesystemTools] Quality gate: rejected fuzzy match (${fuzzy.strategy}) — would remove >${Math.round((1 - replacementLines / matchedLines) * 100)}% of matched lines`)
+      } else {
+        const count = countOccurrences(original, fuzzy.matched)
+        const updated = original.split(fuzzy.matched).join(replacement)
+        writeFileSync(absPath, updated, 'utf-8')
+        const indentNote = fuzzy.indentOffset ? ', re-indented' : ''
+        console.log(`[FilesystemTools] Edited file (${fuzzy.strategy}${indentNote}): ${args.path} (${count} replacement${count > 1 ? 's' : ''})`)
+        return {
+          content: `Successfully replaced ${count} occurrence${count > 1 ? 's' : ''} in ${args.path} (matched via ${fuzzy.strategy}${indentNote})`,
+          isError: false
+        }
       }
     }
 
-    const oldLines = args.old_string.split('\n')
-    const firstLine = oldLines[0].trim()
-    const lastLine = oldLines[oldLines.length - 1].trim()
     const origLines = original.split('\n')
-    const hints: string[] = []
-    for (let i = 0; i < origLines.length; i++) {
-      if (origLines[i].trim().includes(firstLine.slice(0, 40))) {
-        hints.push(`  Line ${i + 1}: ${origLines[i].trim().slice(0, 80)}`)
-        if (hints.length >= 3) break
-      }
-    }
+    const searchLines = args.old_string.split('\n')
+    const similarBlock = findSimilarBlock(origLines, searchLines)
+    const firstLine = searchLines[0].trim()
 
-    const hintText = hints.length > 0
-      ? `\n\nPossible matches found near:\n${hints.join('\n')}\n\nTip: Use cortex_read_file with offset+limit to see exact content around these lines, then retry with the exact text.`
-      : `\n\nThe first line of your search ("${firstLine.slice(0, 60)}") was not found anywhere in the file.`
+    const hintText = similarBlock
+      ? `\n\nMost similar block found:\n${similarBlock}\n\nTip: Use cortex_read_file with offset+limit to see exact content, then retry with the exact text.`
+      : firstLine
+        ? `\n\nThe first line of your search ("${firstLine.slice(0, 60)}") was not found anywhere in the file.`
+        : ''
 
     return {
-      content: `old_string not found in "${args.path}". Tried: exact match → whitespace-normalized → block-anchor → levenshtein-similarity → all failed.${hintText}`,
+      content: `old_string not found in "${args.path}". Tried: exact → uniform-indent → whitespace-normalized → skip-blank → block-anchor → ellipsis → levenshtein → variable-window → all failed.${hintText}`,
       isError: true
     }
   } catch (err) {
